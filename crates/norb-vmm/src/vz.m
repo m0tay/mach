@@ -110,7 +110,9 @@ int vz_start_vm(
             [config setStorageDevices:storageDevices];
         }
 
-        // Host Directory Sharing via VirtioFS
+        // Host Directory Sharing via VirtioFS & Apple Rosetta 2 for Linux
+        NSMutableArray *dirSharing = [NSMutableArray array];
+
         if (shared_dir_path && strlen(shared_dir_path) > 0) {
             if (@available(macOS 12.0, *)) {
                 NSURL *sharedURL = [NSURL fileURLWithPath:[NSString stringWithUTF8String:shared_dir_path]];
@@ -118,9 +120,32 @@ int vz_start_vm(
                 VZSingleDirectoryShare *share = [[VZSingleDirectoryShare alloc] initWithDirectory:sharedDir];
                 VZVirtioFileSystemDeviceConfiguration *fsConfig = [[VZVirtioFileSystemDeviceConfiguration alloc] initWithTag:@"norb_share"];
                 [fsConfig setShare:share];
-                [config setDirectorySharingDevices:@[fsConfig]];
+                [dirSharing addObject:fsConfig];
                 NSLog(@"[norb-vmm] VirtioFS shared folder attached: %s (tag: norb_share)", shared_dir_path);
             }
+        }
+
+#ifdef __arm64__
+        if (@available(macOS 13.0, *)) {
+            if ([VZLinuxRosettaDirectoryShare availability] == VZLinuxRosettaAvailabilityInstalled) {
+                NSError *rosettaErr = nil;
+                VZLinuxRosettaDirectoryShare *rosettaShare = [[VZLinuxRosettaDirectoryShare alloc] initWithError:&rosettaErr];
+                if (rosettaShare) {
+                    VZVirtioFileSystemDeviceConfiguration *rosettaDev = [[VZVirtioFileSystemDeviceConfiguration alloc] initWithTag:@"rosetta"];
+                    [rosettaDev setShare:rosettaShare];
+                    [dirSharing addObject:rosettaDev];
+                    NSLog(@"[norb-vmm] Apple Silicon Rosetta 2 share attached (tag: rosetta)");
+                } else {
+                    NSLog(@"[norb-vmm] Rosetta share initialization failed: %@", rosettaErr);
+                }
+            } else {
+                NSLog(@"[norb-vmm] Rosetta for Linux availability status: %ld", (long)[VZLinuxRosettaDirectoryShare availability]);
+            }
+        }
+#endif
+
+        if ([dirSharing count] > 0) {
+            [config setDirectorySharingDevices:dirSharing];
         }
 
         // Memory Ballooning for dynamic RAM reclamation

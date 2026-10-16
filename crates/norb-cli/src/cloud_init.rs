@@ -72,6 +72,10 @@ runcmd:
   - mkdir -p /Users
   - mount -t virtiofs norb_share /Users || true
   - echo "norb_share /Users virtiofs defaults 0 0" >> /etc/fstab
+  - mkdir -p /media/rosetta
+  - mount -t virtiofs rosetta /media/rosetta || true
+  - echo "rosetta /media/rosetta virtiofs defaults 0 0" >> /etc/fstab
+  - echo ':rosetta:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00:\xff\xff\xff\xff\xff\xfe\xfe\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/media/rosetta/rosetta:CF' > /proc/sys/fs/binfmt_misc/register || true
 "#,
         keys = keys_yaml
     );

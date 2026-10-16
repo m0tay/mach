@@ -262,6 +262,24 @@ pub async fn run(name: Option<&str>) -> Result<()> {
     println!("  Domain:      \x1b[1;34m{}.norb.local\x1b[0m", machine.config.name);
     println!("  SSH Command: \x1b[1;32mssh root@{}\x1b[0m", ip);
 
+    // Mount and register Apple Rosetta 2 for Linux if available
+    let rosetta_res = std::process::Command::new("ssh")
+        .args([
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "LogLevel=ERROR",
+            "-o", "ConnectTimeout=2",
+            &format!("root@{ip}"),
+            "mkdir -p /media/rosetta && mount -t virtiofs rosetta /media/rosetta 2>/dev/null; if [ -f /media/rosetta/rosetta ]; then mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null; echo ':rosetta:M::\\x7fELF\\x02\\x01\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x3e\\x00:\\xff\\xff\\xff\\xff\\xff\\xfe\\xfe\\x00\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xfe\\xff\\xff\\xff:/media/rosetta/rosetta:CF' > /proc/sys/fs/binfmt_misc/register 2>/dev/null; echo rosetta_ready; fi",
+        ])
+        .output();
+
+    if let Ok(out) = rosetta_res {
+        if String::from_utf8_lossy(&out.stdout).contains("rosetta_ready") {
+            println!("  Rosetta 2:   \x1b[1;32mActive\x1b[0m (x86_64 emulation enabled)");
+        }
+    }
+
     // Setup background Docker socket forwarder if Docker is running in this guest
     let check_docker = std::process::Command::new("ssh")
         .args([
