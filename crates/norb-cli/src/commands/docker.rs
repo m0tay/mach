@@ -9,6 +9,39 @@ pub async fn setup(system: bool) -> Result<()> {
     let cfg = NorbConfig::load()?;
     let sock_path = cfg.data_dir.join("run").join("docker.sock");
 
+    if !sock_path.exists() {
+        let machines = super::load_all_machines(&cfg.machines_dir)?;
+        if let Some(m) = machines.iter().find(|m| m.state == norb_common::machine::MachineState::Running) {
+            if let Some(ip) = m.ip_address {
+                let base_ssh = crate::ssh::norb_ssh_args();
+                let mut check_args = base_ssh.clone();
+                check_args.extend(["-o".to_string(), "ConnectTimeout=2".to_string(), format!("root@{ip}"), "test -S /var/run/docker.sock".to_string()]);
+                let is_running = Command::new("ssh").args(&check_args).status().map(|s| s.success()).unwrap_or(false);
+                if !is_running {
+                    let mut start_args = base_ssh.clone();
+                    start_args.extend(["-o".to_string(), "ConnectTimeout=10".to_string(), format!("root@{ip}"), "which dockerd >/dev/null || (apk add --no-cache docker >/dev/null 2>&1 || true); dockerd --data-root /var/lib/docker >/dev/null 2>&1 &".to_string()]);
+                    let _ = Command::new("ssh").args(&start_args).status();
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+
+                let run_dir = cfg.data_dir.join("run");
+                let _ = std::fs::create_dir_all(&run_dir);
+                let _ = std::fs::remove_file(&sock_path);
+                let mut docker_fwd_args = vec!["-f".to_string(), "-nNT".to_string(), "-L".to_string(), format!("{}:/var/run/docker.sock", sock_path.display())];
+                docker_fwd_args.extend(base_ssh);
+                docker_fwd_args.extend(["-o".to_string(), "ConnectTimeout=2".to_string(), format!("root@{ip}")]);
+                let _ = Command::new("ssh").args(&docker_fwd_args).spawn();
+                for _ in 0..15 {
+                    if sock_path.exists() {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                }
+            }
+        }
+    }
+    crate::commands::daemon::ensure_daemon_running();
+
     println!("\x1b[1;36m➜\x1b[0m Configuring Docker CLI context for Norb...");
 
     // Remove existing if present

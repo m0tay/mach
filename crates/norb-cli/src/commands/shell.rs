@@ -43,17 +43,12 @@ pub async fn run(name: Option<&str>, command: &[String]) -> Result<()> {
 
     let ip_str = ip.to_string();
 
-    let mut ssh_args = vec![
-        "-o".to_string(),
-        "StrictHostKeyChecking=no".to_string(),
-        "-o".to_string(),
-        "UserKnownHostsFile=/dev/null".to_string(),
-        "-o".to_string(),
-        "LogLevel=ERROR".to_string(),
+    let mut ssh_args = crate::ssh::norb_ssh_args();
+    ssh_args.extend([
         "-o".to_string(),
         "ConnectTimeout=4".to_string(),
         format!("root@{ip_str}"),
-    ];
+    ]);
 
     if !command.is_empty() {
         ssh_args.extend(command.iter().cloned());

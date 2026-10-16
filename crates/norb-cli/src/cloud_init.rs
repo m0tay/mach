@@ -6,16 +6,28 @@ use std::path::Path;
 use std::process::Command;
 use uuid::Uuid;
 
-/// Locate the host user's SSH public keys to inject into the VM.
+/// Locate the host user's SSH public keys to inject into the VM, including Norb's dedicated key.
 pub fn get_host_ssh_keys() -> Vec<String> {
     let mut keys = Vec::new();
+
+    // Include Norb's dedicated key
+    if let Ok(_) = crate::ssh::ensure_norb_ssh_key() {
+        let pub_key_path = norb_common::config::NorbConfig::default().data_dir.join("ssh").join("id_ed25519.pub");
+        if let Ok(content) = fs::read_to_string(&pub_key_path) {
+            let trimmed = content.trim();
+            if !trimmed.is_empty() {
+                keys.push(trimmed.to_string());
+            }
+        }
+    }
+
     if let Some(home) = dirs::home_dir() {
         let ssh_dir = home.join(".ssh");
         for key_name in &["id_ed25519.pub", "id_rsa.pub", "id_ecdsa.pub"] {
             let key_file = ssh_dir.join(key_name);
             if let Ok(content) = fs::read_to_string(&key_file) {
                 let trimmed = content.trim();
-                if !trimmed.is_empty() {
+                if !trimmed.is_empty() && !keys.contains(&trimmed.to_string()) {
                     keys.push(trimmed.to_string());
                 }
             }
@@ -48,6 +60,17 @@ pub fn generate_cidata_iso(
 
     let user_data = format!(
 r#"#cloud-config
+bootcmd:
+  - mkdir -p /etc/systemd/network
+  - printf '[Match]\nName=e*\n\n[Network]\nDHCP=ipv4\n\n[DHCPv4]\nClientIdentifier=mac\n' > /etc/systemd/network/99-norb-mac.network
+chpasswd:
+  list: |
+    root:root
+    debian:debian
+    ubuntu:ubuntu
+    fedora:fedora
+    norb:norb
+  expire: False
 users:
   - name: root
     ssh_authorized_keys:
@@ -76,8 +99,8 @@ ssh_pwauth: true
 disable_root: false
 runcmd:
   - mount -o remount,rw / || true
-  - sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config || true
-  - mkdir -p /etc/ssh/sshd_config.d && echo "PermitRootLogin prohibit-password" > /etc/ssh/sshd_config.d/norb.conf || true
+  - sed -i 's/^#*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config || true
+  - mkdir -p /etc/ssh/sshd_config.d && echo "PermitRootLogin yes" > /etc/ssh/sshd_config.d/norb.conf || true
   - systemctl restart ssh || systemctl restart sshd || true
   - mkdir -p /Users
   - mount -t virtiofs norb_share /Users || true
@@ -90,6 +113,16 @@ runcmd:
         keys = keys_yaml
     );
     fs::write(temp_dir.join("user-data"), user_data)?;
+
+    let network_config = r#"version: 2
+ethernets:
+  all-eth:
+    match:
+      name: "e*"
+    dhcp4: true
+    dhcp-identifier: mac
+"#;
+    fs::write(temp_dir.join("network-config"), network_config)?;
 
     let _ = fs::remove_file(output_iso);
 

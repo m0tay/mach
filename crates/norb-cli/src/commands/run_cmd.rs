@@ -25,18 +25,33 @@ pub async fn run(
                 let name = command[0].clone();
                 effective_cmd = &command[1..];
                 name
-            } else if let Some(ref def) = cfg.default_machine {
-                def.clone()
             } else {
                 let machines = load_all_machines(&cfg.machines_dir)?;
-                let running: Vec<_> = machines
-                    .into_iter()
-                    .filter(|m| m.state == MachineState::Running)
-                    .collect();
-                if running.is_empty() {
-                    bail!("no running machines found. Run `norb start <distro>` first.");
+                if let Some(ref def) = cfg.default_machine {
+                    if machines.iter().any(|m| &m.config.name == def) {
+                        def.clone()
+                    } else if let Some(running) = machines.iter().find(|m| m.state == MachineState::Running) {
+                        running.config.name.clone()
+                    } else if !machines.is_empty() {
+                        machines[0].config.name.clone()
+                    } else {
+                        bail!("no machines found. Run `norb create <distro>` first.");
+                    }
+                } else {
+                    let running: Vec<_> = machines
+                        .iter()
+                        .filter(|m| m.state == MachineState::Running)
+                        .collect();
+                    if running.is_empty() {
+                        if !machines.is_empty() {
+                            machines[0].config.name.clone()
+                        } else {
+                            bail!("no machines found. Run `norb create <distro>` first.");
+                        }
+                    } else {
+                        running[0].config.name.clone()
+                    }
                 }
-                running[0].config.name.clone()
             }
         }
     };
@@ -62,15 +77,8 @@ pub async fn run(
     let user = user_opt.unwrap_or("root");
     let ip_str = ip.to_string();
 
-    let mut ssh_args = vec![
-        "-o".to_string(),
-        "StrictHostKeyChecking=no".to_string(),
-        "-o".to_string(),
-        "UserKnownHostsFile=/dev/null".to_string(),
-        "-o".to_string(),
-        "LogLevel=ERROR".to_string(),
-        format!("{user}@{ip_str}"),
-    ];
+    let mut ssh_args = crate::ssh::norb_ssh_args();
+    ssh_args.push(format!("{user}@{ip_str}"));
     ssh_args.extend(effective_cmd.iter().cloned());
 
     let status = Command::new("ssh").args(&ssh_args).status()?;

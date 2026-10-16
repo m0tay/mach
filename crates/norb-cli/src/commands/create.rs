@@ -17,13 +17,42 @@ pub async fn run(
     disk: u64,
     arch_str: &str,
 ) -> Result<()> {
-    let cfg = NorbConfig::load()?;
-    let machine_name = name.unwrap_or(distro).to_lowercase();
+    let mut cfg = NorbConfig::load()?;
 
-    // Check if machine already exists
-    if find_machine(&cfg.machines_dir, &machine_name)?.is_some() {
-        bail!("machine '{machine_name}' already exists");
-    }
+    let is_machine_taken = |m_name: &str| -> Result<bool> {
+        if find_machine(&cfg.machines_dir, m_name)?.is_some() {
+            return Ok(true);
+        }
+        if cfg.machines_dir.join(m_name).exists() {
+            return Ok(true);
+        }
+        Ok(false)
+    };
+
+    let machine_name = match name {
+        Some(explicit_name) => {
+            let m_name = explicit_name.to_lowercase();
+            if is_machine_taken(&m_name)? {
+                bail!("machine '{m_name}' already exists");
+            }
+            m_name
+        }
+        None => {
+            let base = distro.to_lowercase();
+            if !is_machine_taken(&base)? {
+                base
+            } else {
+                let mut idx = 2;
+                loop {
+                    let candidate = format!("{base}-{idx}");
+                    if !is_machine_taken(&candidate)? {
+                        break candidate;
+                    }
+                    idx += 1;
+                }
+            }
+        }
+    };
 
     let arch = match arch_str.to_lowercase().as_str() {
         "aarch64" | "arm64" => Architecture::Aarch64,
@@ -101,6 +130,11 @@ pub async fn run(
     }
 
     save_machine(&cfg.machines_dir, &machine)?;
+
+    if cfg.default_machine.is_none() {
+        cfg.default_machine = Some(machine_name.clone());
+        cfg.save()?;
+    }
 
     println!(
         "\x1b[1;32m✓\x1b[0m Machine \x1b[1m{}\x1b[0m created successfully (id: {}).",

@@ -12,6 +12,7 @@ pub mod dns;
 pub mod images;
 pub mod port_forward;
 pub mod proxy;
+pub mod ssh;
 pub mod tls;
 
 use cli::{Cli, Commands, ConfigAction, DaemonAction, DnsAction, DockerAction, K8sAction};
@@ -128,7 +129,13 @@ async fn main() -> Result<()> {
         }
 
         let target_name = if let Some(ref def) = cfg.default_machine {
-            def.clone()
+            if machines.iter().any(|m| &m.config.name == def) {
+                def.clone()
+            } else if let Some(running) = machines.iter().find(|m| m.state == MachineState::Running) {
+                running.config.name.clone()
+            } else {
+                machines[0].config.name.clone()
+            }
         } else if let Some(running) = machines.iter().find(|m| m.state == MachineState::Running) {
             running.config.name.clone()
         } else {

@@ -26,6 +26,7 @@ pub enum Commands {
     /// Create a new Linux machine
     Create {
         /// Linux distribution (e.g. ubuntu, debian, fedora, arch, alpine)
+        #[arg(default_value = "ubuntu")]
         distro: String,
 
         /// Machine name (defaults to distro name)

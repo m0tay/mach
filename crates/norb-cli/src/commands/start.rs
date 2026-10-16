@@ -34,53 +34,83 @@ fn resolve_assets(cfg: &NorbConfig) -> Result<(PathBuf, PathBuf)> {
     );
 }
 
-/// Generate a stable MAC address string from machine UUID bytes: `52:54:00:12:xx:yy`
+/// Generate stable MAC address patterns from machine UUID bytes: `52:54:00:12:xx:yy`
 fn generate_mac(machine_id: &uuid::Uuid) -> (String, String) {
     let bytes = machine_id.as_bytes();
     let b1 = bytes[14];
     let b2 = bytes[15];
     // Standard format for VZMACAddress: 52:54:00:12:xx:yy
     let full_mac = format!("52:54:00:12:{:02x}:{:02x}", b1, b2);
-    // macOS dhcpd_leases strips leading zero on single digits
-    let lease_mac = format!("52:54:{:x}:12:{:x}:{:x}", 0, b1, b2);
+    // macOS dhcpd_leases strips leading zero on single digits: e.g. 52:54:0:12:a:bf
+    let lease_mac = format!("52:54:0:12:{:x}:{:x}", b1, b2);
     (full_mac, lease_mac)
 }
 
-/// Parse the assigned IP address from /var/db/dhcpd_leases for a given MAC address.
-fn get_latest_lease_timestamp() -> u64 {
+/// Get the latest lease expiration timestamps currently recorded for a machine's MAC and name.
+fn get_machine_lease_timestamps(name: &str, mac_patterns: &[String]) -> (u64, u64) {
     let Ok(content) = fs::read_to_string("/var/db/dhcpd_leases") else {
-        return 0;
+        return (0, 0);
     };
-    let mut max_ts = 0u64;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if let Some(stripped) = trimmed.strip_prefix("lease=0x") {
-            if let Ok(val) = u64::from_str_radix(stripped, 16) {
-                if val > max_ts {
-                    max_ts = val;
+    let blocks: Vec<&str> = content.split('}').collect();
+    let mut max_mac_ts = 0u64;
+    let mut max_name_ts = 0u64;
+
+    for block in blocks {
+        let mut lease_time = 0u64;
+        let mut matches_name = false;
+        let matches_pattern = mac_patterns.iter().any(|p| block.contains(p));
+
+        for line in block.lines() {
+            let trimmed = line.trim();
+            if let Some(stripped) = trimmed.strip_prefix("name=") {
+                if stripped.eq_ignore_ascii_case(name) {
+                    matches_name = true;
+                }
+            } else if let Some(stripped) = trimmed.strip_prefix("lease=0x") {
+                if let Ok(val) = u64::from_str_radix(stripped, 16) {
+                    lease_time = val;
                 }
             }
         }
+
+        if matches_pattern && lease_time > max_mac_ts {
+            max_mac_ts = lease_time;
+        }
+        if matches_name && lease_time > max_name_ts {
+            max_name_ts = lease_time;
+        }
     }
-    max_ts
+    (max_mac_ts, max_name_ts)
 }
 
-/// Parse the assigned IP address from /var/db/dhcpd_leases.
-fn lookup_dhcp_lease(mac_patterns: &[String], lease_after: u64) -> Option<IpAddr> {
+/// Parse the assigned IP address from /var/db/dhcpd_leases matching either MAC address or machine name.
+fn lookup_dhcp_lease(
+    name: &str,
+    mac_patterns: &[String],
+    prev_mac_ts: u64,
+    prev_name_ts: u64,
+) -> Option<IpAddr> {
     let Ok(content) = fs::read_to_string("/var/db/dhcpd_leases") else {
         return None;
     };
 
     let blocks: Vec<&str> = content.split('}').collect();
-    let mut best_lease: Option<(u64, IpAddr)> = None;
+    let mut best_mac_lease: Option<(u64, IpAddr)> = None;
+    let mut best_name_lease: Option<(u64, IpAddr)> = None;
 
     for block in blocks {
-        let matches_pattern = mac_patterns.iter().any(|pattern| block.contains(pattern));
         let mut ip_opt = None;
         let mut lease_time = 0u64;
+        let mut matches_name = false;
+        let matches_pattern = mac_patterns.iter().any(|pattern| block.contains(pattern));
+
         for line in block.lines() {
             let trimmed = line.trim();
-            if let Some(stripped) = trimmed.strip_prefix("ip_address=") {
+            if let Some(stripped) = trimmed.strip_prefix("name=") {
+                if stripped.eq_ignore_ascii_case(name) {
+                    matches_name = true;
+                }
+            } else if let Some(stripped) = trimmed.strip_prefix("ip_address=") {
                 if let Ok(ip) = stripped.parse::<IpAddr>() {
                     ip_opt = Some(ip);
                 }
@@ -90,15 +120,22 @@ fn lookup_dhcp_lease(mac_patterns: &[String], lease_after: u64) -> Option<IpAddr
                 }
             }
         }
+
         if let Some(ip) = ip_opt {
-            if matches_pattern || (lease_after > 0 && lease_time > lease_after) {
-                if best_lease.is_none() || lease_time > best_lease.unwrap().0 {
-                    best_lease = Some((lease_time, ip));
+            if matches_pattern && (prev_mac_ts == 0 || lease_time > prev_mac_ts) {
+                if best_mac_lease.is_none() || lease_time > best_mac_lease.unwrap().0 {
+                    best_mac_lease = Some((lease_time, ip));
+                }
+            }
+            if matches_name && (prev_name_ts == 0 || lease_time > prev_name_ts) {
+                if best_name_lease.is_none() || lease_time > best_name_lease.unwrap().0 {
+                    best_name_lease = Some((lease_time, ip));
                 }
             }
         }
     }
-    best_lease.map(|(_, ip)| ip)
+
+    best_mac_lease.or(best_name_lease).map(|(_, ip)| ip)
 }
 
 pub async fn run(name: Option<&str>) -> Result<()> {
@@ -193,7 +230,11 @@ pub async fn run(name: Option<&str>) -> Result<()> {
         .stdin(std::process::Stdio::null())
         .process_group(0);
 
-    let lease_before = get_latest_lease_timestamp();
+    let patterns = vec![
+        mac_str.clone(),
+        lease_pattern,
+    ];
+    let (prev_mac_ts, prev_name_ts) = get_machine_lease_timestamps(&machine.config.name, &patterns);
 
     let child = cmd.spawn()
         .with_context(|| "failed to spawn background VMM process")?;
@@ -204,16 +245,11 @@ pub async fn run(name: Option<&str>) -> Result<()> {
     print!("  Waiting for network & DHCP lease...");
     std::io::Write::flush(&mut std::io::stdout())?;
 
-    // Poll for DHCP IP assignment
-    let patterns = vec![
-        mac_str.clone(),
-        lease_pattern,
-    ];
     let mut assigned_ip = None;
 
-    for _ in 0..75 {
+    for _ in 0..150 {
         sleep(Duration::from_millis(200)).await;
-        if let Some(ip) = lookup_dhcp_lease(&patterns, lease_before) {
+        if let Some(ip) = lookup_dhcp_lease(&machine.config.name, &patterns, prev_mac_ts, prev_name_ts) {
             assigned_ip = Some(ip);
             break;
         }
@@ -221,32 +257,44 @@ pub async fn run(name: Option<&str>) -> Result<()> {
 
     println!();
 
-    let ip = assigned_ip.unwrap_or_else(|| {
-        std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 64, 4))
-    });
+    let ip = match assigned_ip {
+        Some(ip) => ip,
+        None => {
+            let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(child_pid as i32), nix::sys::signal::Signal::SIGTERM);
+            bail!("machine started (PID: {child_pid}), but did not acquire a DHCP lease in time. Check {} for details.", machine_dir.join("vm.log").display());
+        }
+    };
 
     // Wait for SSH port to accept connections
     print!("  Waiting for SSH service to become ready...");
     std::io::Write::flush(&mut std::io::stdout())?;
-    for _ in 0..60 {
+    let mut ssh_ready = false;
+    let base_ssh = crate::ssh::norb_ssh_args();
+
+    for _ in 0..120 {
+        let mut test_args = base_ssh.clone();
+        test_args.extend([
+            "-o".to_string(), "ConnectTimeout=1".to_string(),
+            format!("root@{ip}"),
+            "true".to_string(),
+        ]);
         let test_ssh = std::process::Command::new("ssh")
-            .args([
-                "-o", "StrictHostKeyChecking=no",
-                "-o", "UserKnownHostsFile=/dev/null",
-                "-o", "LogLevel=ERROR",
-                "-o", "ConnectTimeout=1",
-                &format!("root@{ip}"),
-                "true",
-            ])
+            .args(&test_args)
             .status();
         if let Ok(st) = test_ssh {
             if st.success() {
+                ssh_ready = true;
                 break;
             }
         }
         sleep(Duration::from_millis(500)).await;
     }
     println!();
+
+    if !ssh_ready {
+        let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(child_pid as i32), nix::sys::signal::Signal::SIGTERM);
+        bail!("machine acquired IP {ip}, but SSH service did not become ready within 60 seconds.");
+    }
 
     machine.state = MachineState::Running;
     machine.ip_address = Some(ip);
@@ -263,15 +311,14 @@ pub async fn run(name: Option<&str>) -> Result<()> {
     println!("  SSH Command: \x1b[1;32mssh root@{}\x1b[0m", ip);
 
     // Mount and register Apple Rosetta 2 for Linux if available
+    let mut rosetta_args = base_ssh.clone();
+    rosetta_args.extend([
+        "-o".to_string(), "ConnectTimeout=2".to_string(),
+        format!("root@{ip}"),
+        "mkdir -p /media/rosetta && mount -t virtiofs rosetta /media/rosetta 2>/dev/null; if [ -f /media/rosetta/rosetta ]; then mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null; echo ':rosetta:M::\\x7fELF\\x02\\x01\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x3e\\x00:\\xff\\xff\\xff\\xff\\xff\\xfe\\xfe\\x00\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xfe\\xff\\xff\\xff:/media/rosetta/rosetta:CF' > /proc/sys/fs/binfmt_misc/register 2>/dev/null; echo rosetta_ready; fi".to_string(),
+    ]);
     let rosetta_res = std::process::Command::new("ssh")
-        .args([
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
-            "-o", "LogLevel=ERROR",
-            "-o", "ConnectTimeout=2",
-            &format!("root@{ip}"),
-            "mkdir -p /media/rosetta && mount -t virtiofs rosetta /media/rosetta 2>/dev/null; if [ -f /media/rosetta/rosetta ]; then mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null; echo ':rosetta:M::\\x7fELF\\x02\\x01\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x3e\\x00:\\xff\\xff\\xff\\xff\\xff\\xfe\\xfe\\x00\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xfe\\xff\\xff\\xff:/media/rosetta/rosetta:CF' > /proc/sys/fs/binfmt_misc/register 2>/dev/null; echo rosetta_ready; fi",
-        ])
+        .args(&rosetta_args)
         .output();
 
     if let Ok(out) = rosetta_res {
@@ -281,15 +328,14 @@ pub async fn run(name: Option<&str>) -> Result<()> {
     }
 
     // Setup background Docker socket forwarder if Docker is running in this guest
+    let mut check_docker_args = base_ssh.clone();
+    check_docker_args.extend([
+        "-o".to_string(), "ConnectTimeout=2".to_string(),
+        format!("root@{ip}"),
+        "test -S /var/run/docker.sock".to_string(),
+    ]);
     let check_docker = std::process::Command::new("ssh")
-        .args([
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
-            "-o", "LogLevel=ERROR",
-            "-o", "ConnectTimeout=2",
-            &format!("root@{ip}"),
-            "test -S /var/run/docker.sock",
-        ])
+        .args(&check_docker_args)
         .status();
 
     if let Ok(st) = check_docker {
@@ -298,16 +344,14 @@ pub async fn run(name: Option<&str>) -> Result<()> {
             let _ = fs::create_dir_all(&run_dir);
             let host_sock = run_dir.join("docker.sock");
             let _ = fs::remove_file(&host_sock);
+            let mut docker_fwd_args = vec!["-f".to_string(), "-nNT".to_string(), "-L".to_string(), format!("{}:/var/run/docker.sock", host_sock.display())];
+            docker_fwd_args.extend(base_ssh.clone());
+            docker_fwd_args.extend([
+                "-o".to_string(), "ConnectTimeout=2".to_string(),
+                format!("root@{ip}"),
+            ]);
             let _ = std::process::Command::new("ssh")
-                .args([
-                    "-f", "-nNT",
-                    "-L", &format!("{}:/var/run/docker.sock", host_sock.display()),
-                    "-o", "StrictHostKeyChecking=no",
-                    "-o", "UserKnownHostsFile=/dev/null",
-                    "-o", "LogLevel=ERROR",
-                    "-o", "ConnectTimeout=2",
-                    &format!("root@{ip}"),
-                ])
+                .args(&docker_fwd_args)
                 .spawn();
 
             for _ in 0..15 {

@@ -21,6 +21,12 @@ pub async fn run(name: &str, _yes: bool) -> Result<()> {
             .with_context(|| format!("failed to remove machine directory: {}", machine_dir.display()))?;
     }
 
+    let mut cfg = cfg;
+    if cfg.default_machine.as_deref() == Some(&machine.config.name) {
+        cfg.default_machine = None;
+        let _ = cfg.save();
+    }
+
     println!(
         "\x1b[1;32m✓\x1b[0m Machine \x1b[1m{}\x1b[0m deleted successfully.",
         machine.config.name
