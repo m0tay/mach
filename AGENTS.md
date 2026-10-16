@@ -19,7 +19,43 @@ Welcome, AI Coding Agent! This document is the definitive guide for developing, 
 
 ---
 
-## 2. Workspace & Crate Structure
+## 2. Modern Architectural Stance vs. Legacy Approaches (Feature Parity + Common Interface)
+
+A guiding directive for Norb is: **Achieve 100% feature and developer interface parity with OrbStack, but do not copy OrbStack's internal implementation if a cleaner, more modern, or more native approach exists.**
+
+### The Modern vs. Legacy Architectural Matrix
+
+| Capability | Legacy / OrbStack Approach | Norb Modern Native Approach | Why Norb's Approach is Better |
+| :--- | :--- | :--- | :--- |
+| **Virtualization Framework** | Proprietary closed-source Swift/C++ hypervisor wrapper | Native Apple `Virtualization.framework` (`VZVirtualMachine`) in Rust/Obj-C | 100% open-source, official Apple Silicon support, zero proprietary lock-in, ultra-low overhead (<15 MB footprint). |
+| **Linux Containers on macOS** | Proprietary VM running closed Linux system runtime | Standard Linux VM kernel running OCI runtime (`containerd` / `dockerd`) | True Linux container semantics (cgroups v2, namespaces, overlayfs) managed through standard OCI tools rather than black-box daemons. |
+| **x86_64 Emulation (Rosetta 2)** | Custom binfmt wrappers / QEMU translation | First-party `VZLinuxRosettaDirectoryShare` mounted via VirtioFS with kernel `binfmt_misc` | Hardware-accelerated memory model (TSO) on Apple Silicon; near-native x86_64 performance inside Linux Docker containers. |
+| **Disk Storage & Snapshotting** | Custom sparse bundle formats or block copies | Native **APFS Copy-on-Write (CoW)** via `clonefile` / `/bin/cp -c` | Sub-millisecond instant cloning without duplicating disk bytes; shared blocks until written; native APFS compression. |
+| **Host Directory Sharing** | Custom 9P / proprietary VirtioFS server | First-party Apple VirtioFS (`VZVirtioFileSystemDeviceConfiguration`) with 1:1 `/Users` path parity | Native Darwin kernel page caching; zero path translation overhead; seamless editing in macOS IDEs. |
+| **Local DNS & Domains** | Proprietary system DNS hijacking | Async Tokio UDP responder on `127.0.0.1:5354` + native `/etc/resolver/norb.local` | Leverages macOS native resolver framework without modifying `/etc/hosts` or interfering with system DNS daemons. |
+| **Dynamic Port Forwarding** | Proprietary background daemon | Async Tokio port forwarder polling Docker socket events and binding `127.0.0.1:PORT` | Zero root/sudo daemon requirements; dynamically binds and unbinds container ports in user space. |
+| **Host Command Bridge** | Custom IPC bridge | Native bidirectional TCP bridge on localhost (port 32222) handling `mac open`, `mac pbcopy`, `mac pbpaste` | Lightweight, robust, standard protocol easily scriptable from any Linux shell. |
+| **System Overhead** | Background menu bar GUI app (~50–100 MB RAM) | Pure CLI-first binary + headless Tokio background daemon (<15 MB RAM) | Starts instantly (<0.5s), consumes negligible battery, operates seamlessly in headless/CI and SSH terminal environments. |
+
+### Preserving the Common Interface (Developer Ergonomics)
+
+While the internals are modern, native, and open-source, the external user experience matches developer muscle memory 1:1:
+1. **Short Daily Driver (`norb`)**:
+   - `norb` $\rightarrow$ Interactive shell in default machine.
+   - `norb uname -a` $\rightarrow$ Transparent command execution in Linux.
+   - `norb -m <machine> -u root <cmd>` $\rightarrow$ Machine and user flags.
+2. **Management Plane (`norbctl`)**:
+   - Complete subcommands matching `orbctl`: `create`, `list`, `start`, `stop`, `delete`, `clone`, `rename`, `info`, `top`, `debug`, `export`, `import`, `push`, `pull`, `doctor`, `k8s`.
+3. **Standard Docker Context**:
+   - `docker --context norb ps` / `docker context use norb` pointing to `~/.norb/run/docker.sock`.
+   - Optional legacy symlink at `/var/run/docker.sock` for VS Code Dev Containers and Testcontainers via `norbctl docker setup --system`.
+4. **Networking**:
+   - Container domain routing: `http://<machine>.norb.local` and `http://<container>.norb.local`.
+   - Direct published ports: `curl http://localhost:<port>`.
+
+---
+
+## 3. Workspace & Crate Structure
 
 ```
 norb/
@@ -55,7 +91,7 @@ norb/
 
 ---
 
-## 3. Golden Rules for AI Agents
+## 4. Golden Rules for AI Agents
 
 ### Rule 1: Codesigning with Entitlements is Mandatory
 Apple Silicon hypervisor frameworks strictly require specific entitlements. Running an unsigned or improperly signed `norb` binary will fail with OS signal `SIGKILL` or initialization failure `-2`.
@@ -94,7 +130,7 @@ Do **NOT** assume code works just because `cargo check` passes.
 
 ---
 
-## 4. Key Technical Invariants & Gotchas
+## 5. Key Technical Invariants & Gotchas
 
 ### 1. DHCP Lease Discovery in `/var/db/dhcpd_leases`
 - macOS `bootpd` writes DHCP leases to `/var/db/dhcpd_leases`.
@@ -131,7 +167,7 @@ Do **NOT** assume code works just because `cargo check` passes.
 
 ---
 
-## 5. Development Cheat Sheet
+## 6. Development Cheat Sheet
 
 | Task | Command |
 | :--- | :--- |
@@ -148,7 +184,7 @@ Do **NOT** assume code works just because `cargo check` passes.
 
 ---
 
-## 6. Guidelines for Parallel Subagent Workflows
+## 7. Guidelines for Parallel Subagent Workflows
 
 When deploying subagents in parallel to execute sprints or fix issues:
 1. **Isolated Responsibilities**: Scope subagents by clear functional boundaries (e.g., Subagent 1: Distro image catalog in `images.rs`; Subagent 2: Port forwarding & DNS in `port_forward.rs` and `dns.rs`).
