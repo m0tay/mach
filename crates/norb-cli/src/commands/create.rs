@@ -37,7 +37,7 @@ pub async fn run(
 
     if !is_alpine && distro_info.is_none() {
         bail!(
-            "unsupported distribution '{distro}'. Supported distributions: alpine, debian, ubuntu"
+            "unsupported distribution '{distro}'. Supported distributions: alpine, debian, ubuntu, fedora"
         );
     }
 

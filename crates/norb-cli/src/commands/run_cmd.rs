@@ -17,10 +17,15 @@ pub async fn run(
     }
 
     let cfg = NorbConfig::load()?;
+    let mut effective_cmd = command;
     let target_name = match machine_opt {
         Some(n) => n.to_string(),
         None => {
-            if let Some(ref def) = cfg.default_machine {
+            if command.len() > 1 && find_machine(&cfg.machines_dir, &command[0])?.is_some() {
+                let name = command[0].clone();
+                effective_cmd = &command[1..];
+                name
+            } else if let Some(ref def) = cfg.default_machine {
                 def.clone()
             } else {
                 let machines = load_all_machines(&cfg.machines_dir)?;
@@ -35,6 +40,10 @@ pub async fn run(
             }
         }
     };
+
+    if effective_cmd.is_empty() {
+        bail!("no command specified to run");
+    }
 
     let mut machine = find_machine(&cfg.machines_dir, &target_name)?
         .with_context(|| format!("machine '{target_name}' not found"))?;
@@ -62,7 +71,7 @@ pub async fn run(
         "LogLevel=ERROR".to_string(),
         format!("{user}@{ip_str}"),
     ];
-    ssh_args.extend(command.iter().cloned());
+    ssh_args.extend(effective_cmd.iter().cloned());
 
     let status = Command::new("ssh").args(&ssh_args).status()?;
     if !status.success() {
