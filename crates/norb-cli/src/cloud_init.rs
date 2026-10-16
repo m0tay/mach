@@ -57,6 +57,16 @@ users:
     sudo: ALL=(ALL) NOPASSWD:ALL
     ssh_authorized_keys:
 {keys}    shell: /bin/bash
+  - name: ubuntu
+    gecos: Ubuntu User
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+{keys}    shell: /bin/bash
+  - name: fedora
+    gecos: Fedora User
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+{keys}    shell: /bin/bash
   - name: norb
     gecos: Norb User
     sudo: ALL=(ALL) NOPASSWD:ALL

@@ -22,21 +22,40 @@ pub async fn run_foreground() -> Result<()> {
 
     println!("[norb-daemon] Starting embedded DNS responder on 127.0.0.1:5354...");
     println!("[norb-daemon] Starting Docker dynamic port forwarder...");
+    println!("[norb-daemon] Starting HTTP/HTTPS reverse proxy on 127.0.0.1:80/443 (*.norb.local)...");
+    println!("[norb-daemon] Starting macOS host command bridge...");
 
+    let m_dir = machines_dir.clone();
     let dns_task = tokio::spawn(async move {
-        if let Err(e) = dns::run_dns_server(&machines_dir).await {
+        if let Err(e) = dns::run_dns_server(&m_dir).await {
             eprintln!("[norb-daemon] DNS responder error: {e:?}");
         }
     });
 
+    let ds_clone = docker_sock.clone();
+    let m_dir2 = machines_dir.clone();
     let forwarder_task = tokio::spawn(async move {
-        let cfg2 = NorbConfig::load().unwrap();
-        if let Err(e) = port_forward::run_port_forwarder(&docker_sock, &cfg2.machines_dir).await {
+        if let Err(e) = port_forward::run_port_forwarder(&ds_clone, &m_dir2).await {
             eprintln!("[norb-daemon] Port forwarder error: {e:?}");
         }
     });
 
-    let _ = tokio::try_join!(dns_task, forwarder_task);
+    let ds_clone2 = docker_sock.clone();
+    let m_dir3 = machines_dir.clone();
+    let proxy_task = tokio::spawn(async move {
+        if let Err(e) = crate::proxy::run_reverse_proxy(&ds_clone2, &m_dir3).await {
+            eprintln!("[norb-daemon] Reverse proxy error: {e:?}");
+        }
+    });
+
+    let rd_clone = run_dir.clone();
+    let bridge_task = tokio::spawn(async move {
+        if let Err(e) = crate::bridge::run_host_bridge(&rd_clone).await {
+            eprintln!("[norb-daemon] Host bridge error: {e:?}");
+        }
+    });
+
+    let _ = tokio::join!(dns_task, forwarder_task, proxy_task, bridge_task);
     Ok(())
 }
 

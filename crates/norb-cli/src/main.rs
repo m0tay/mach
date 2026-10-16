@@ -5,13 +5,16 @@ use clap::Parser;
 use std::path::Path;
 
 mod cli;
+pub mod bridge;
 pub mod cloud_init;
 mod commands;
 pub mod dns;
 pub mod images;
 pub mod port_forward;
+pub mod proxy;
+pub mod tls;
 
-use cli::{Cli, Commands, ConfigAction, DaemonAction, DnsAction, DockerAction};
+use cli::{Cli, Commands, ConfigAction, DaemonAction, DnsAction, DockerAction, K8sAction};
 use norb_common::config::NorbConfig;
 use norb_common::machine::MachineState;
 
@@ -59,6 +62,7 @@ Usage:
 
 Linux machines:
   clone       Clone a machine
+  code        Open VS Code connected to a machine
   create      Create a new machine
   default     Get or set the default machine
   delete      Delete a machine
@@ -67,6 +71,7 @@ Linux machines:
   info        Get info about a machine
   list        List machines
   logs        Show logs for a machine
+  mount       Mount or open machine filesystem in Finder
   pull        Copy files from Linux
   push        Copy files to Linux
   rename      Rename a machine
@@ -75,7 +80,9 @@ Linux machines:
   ssh         Show SSH details
 
 Containers:
+  debug       Debug a Docker container with extra tools
   docker      Extension commands for Docker
+  k8s         Manage local Kubernetes cluster
 
 General:
   config      Change Norb settings
@@ -153,7 +160,8 @@ async fn main() -> Result<()> {
         "clone", "create", "list", "ls", "start", "stop", "restart", "delete",
         "default", "export", "import", "rename", "shell", "run", "info",
         "status", "top", "logs", "ssh", "push", "pull", "docker", "daemon",
-        "dns", "doctor", "config", "version", "boot", "run-vm", "help",
+        "dns", "doctor", "config", "version", "boot", "run-vm", "debug",
+        "mount", "code", "k8s", "help",
         "--help", "-h", "--version", "-V",
     ];
 
@@ -297,11 +305,31 @@ async fn main() -> Result<()> {
             }
         },
         Commands::Docker { action } => match action {
-            DockerAction::Setup => {
-                commands::docker::setup().await?;
+            DockerAction::Setup { system } => {
+                commands::docker::setup(system).await?;
             }
             DockerAction::Status => {
                 commands::docker::status().await?;
+            }
+        },
+        Commands::Debug { container } => {
+            commands::debug::run(&container).await?;
+        }
+        Commands::Mount { machine, target } => {
+            commands::mount::run_mount(&machine, target.as_deref()).await?;
+        }
+        Commands::Code { machine, path } => {
+            commands::mount::run_code(&machine, path.as_deref()).await?;
+        }
+        Commands::K8s { action } => match action {
+            K8sAction::Enable => {
+                commands::k8s::enable().await?;
+            }
+            K8sAction::Disable => {
+                commands::k8s::disable().await?;
+            }
+            K8sAction::Status => {
+                commands::k8s::status().await?;
             }
         },
         Commands::Version => {

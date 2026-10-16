@@ -253,6 +253,34 @@ pub enum Commands {
         action: ConfigAction,
     },
 
+    /// Debug a Docker container with extra diagnostic tools (works on scratch/distroless)
+    Debug {
+        /// Target container name or ID
+        container: String,
+    },
+
+    /// Mount or open a machine's filesystem in macOS Finder
+    Mount {
+        /// Machine name
+        machine: String,
+        /// Target mount directory (defaults to ~/Norb/<machine>)
+        target: Option<PathBuf>,
+    },
+
+    /// Open VS Code connected to a machine via SSH
+    Code {
+        /// Machine name
+        machine: String,
+        /// Optional directory path in machine (defaults to /root)
+        path: Option<String>,
+    },
+
+    /// Manage local Kubernetes (K3s) cluster
+    K8s {
+        #[command(subcommand)]
+        action: K8sAction,
+    },
+
     /// Manage background DNS and port forwarding daemon
     Daemon {
         #[command(subcommand)]
@@ -328,8 +356,23 @@ pub enum ConfigAction {
 #[derive(Subcommand, Debug)]
 pub enum DockerAction {
     /// Configure macOS docker context to connect to Norb
-    Setup,
+    Setup {
+        /// Also symlink /var/run/docker.sock for legacy tools & IDEs
+        #[arg(long)]
+        system: bool,
+    },
     /// Show Docker integration status
+    Status,
+}
+
+/// Subcommands for `norb k8s`.
+#[derive(Subcommand, Debug)]
+pub enum K8sAction {
+    /// Enable and start local Kubernetes cluster
+    Enable,
+    /// Stop local Kubernetes cluster
+    Disable,
+    /// Show Kubernetes cluster status
     Status,
 }
 

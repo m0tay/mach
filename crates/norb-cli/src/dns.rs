@@ -76,15 +76,19 @@ pub fn handle_dns_query(packet: &[u8], machines_dir: &Path) -> Option<Vec<u8>> {
         if prefix == "host" || prefix == "gateway" {
             Some(Ipv4Addr::new(192, 168, 64, 1))
         } else {
-            let machines = load_all_machines(machines_dir).ok()?;
-            machines
+            let machines = load_all_machines(machines_dir).unwrap_or_default();
+            let machine_ip = machines
                 .into_iter()
                 .find(|m| m.config.name.eq_ignore_ascii_case(prefix))
                 .and_then(|m| m.ip_address)
                 .and_then(|ip| match ip {
                     std::net::IpAddr::V4(v4) => Some(v4),
                     _ => None,
-                })
+                });
+
+            // If it matches a machine name, return the VM's DHCP IP;
+            // otherwise, return 127.0.0.1 to route container HTTP traffic to Norb's local reverse proxy.
+            Some(machine_ip.unwrap_or(Ipv4Addr::new(127, 0, 0, 1)))
         }
     } else if domain == "host.docker.internal" || domain == "host.norb.internal" {
         Some(Ipv4Addr::new(192, 168, 64, 1))
