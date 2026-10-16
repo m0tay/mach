@@ -1,0 +1,24 @@
+[package]
+name = "norb-vmm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Virtual Machine Monitor layer for the Norb VM manager"
+
+[dependencies]
+norb-common = { path = "../norb-common" }
+norb-hypervisor = { path = "../norb-hypervisor" }
+norb-virtio = { path = "../norb-virtio" }
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tokio = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
+libc.workspace = true
+parking_lot.workspace = true
+bytes.workspace = true
+
+[build-dependencies]
+cc = "1.8.0"

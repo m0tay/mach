@@ -1,0 +1,53 @@
+[workspace]
+members = [
+    "crates/norb-common",
+    "crates/norb-hypervisor",
+    "crates/norb-vmm",
+    "crates/norb-virtio",
+    "crates/norb-cli",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Norb Contributors"]
+license = "MIT"
+repository = "https://github.com/user/norb"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging & tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# CLI
+clap = { version = "4", features = ["derive", "color", "env"] }
+
+# Unix system calls
+nix = { version = "0.29", features = ["mman", "signal", "process", "fs", "ioctl", "net", "user", "hostname"] }
+libc = "0.2"
+
+# IPC / communication
+tokio-util = { version = "0.7", features = ["codec"] }
+bytes = "1"
+
+# Config
+dirs = "5"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Misc
+once_cell = "1"
+parking_lot = "0.12"
+bitflags = "2"
