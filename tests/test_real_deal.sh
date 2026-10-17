@@ -118,7 +118,7 @@ rm -f "$HOST_TEST_FILE" "$GUEST_WRITE_FILE"
 # ------------------------------------------------------------------------------
 echo -e "\n${YELLOW}[Phase 4] Testing APFS Copy-on-Write Disk Clone & State Isolation...${NC}"
 mach stop real-alp >/dev/null
-mach clone real-alp real-clone >/dev/null
+machctl clone real-alp real-clone >/dev/null
 pass "APFS instant cloned 'real-alp' -> 'real-clone'"
 
 # Start clone and write unique marker
@@ -159,7 +159,7 @@ fi
 echo -e "\n${YELLOW}[Phase 6] Testing Docker Engine & Dynamic Port Forwarding...${NC}"
 mach stop real-deb >/dev/null
 mach start real-alp >/dev/null
-mach docker setup >/dev/null
+machctl docker setup >/dev/null
 pass "Docker context 'mach' configured"
 
 # Check docker ps
