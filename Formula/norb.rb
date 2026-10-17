@@ -27,30 +27,21 @@ class Norb < Formula
     (fish_completion/"norb.fish").write Utils.safe_popen_read(bin/"norb", "completion", "fish")
   end
 
-  def post_install
-    ohai "Initializing Norb environment and provisioning Debian & Kubernetes..."
-    # Run onboarding setup (creates Debian machine, k8s cluster node, and good-to-have integrations)
-    system bin/"norb", "setup", "--welcome"
-  rescue => e
-    opoo "Automatic initialization deferred: #{e.message}"
-    puts "You can complete environment setup at any time by simply running: norb setup"
-  end
-
   def caveats
     <<~EOS
       🎉 Norb is installed and ready on your Apple Silicon Mac!
 
-      Quickstart:
-        • Drop into your Debian Linux shell:  norb
-        • Run commands right from your Mac:  norb uname -a
-        • Use Docker with zero overhead:     docker ps
-        • Check your Kubernetes cluster:     kubectl get nodes
-        • Browse Linux files in Finder:      open ~/Norb
-        • Live resource activity monitor:    norb top
-        • Apple menu bar status item:        norb menu &
+      To initialize your environment (Debian Linux, Kubernetes, and Docker):
+        norb
 
-      For a guided onboarding tour, run:
-        norb setup
+      Quickstart:
+        • Drop into Debian shell:   norb
+        • Run Linux commands:       norb uname -a
+        • Docker containers:        docker ps
+        • Kubernetes cluster:       kubectl get nodes
+        • Activity dashboard:       norb top
+        • Open files in Finder:     open ~/Norb
+        • Apple menu bar icon:      norb menu &
     EOS
   end
 
