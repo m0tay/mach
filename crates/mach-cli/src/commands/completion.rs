@@ -45,27 +45,27 @@ pub fn detect_active_shell() -> Option<Shell> {
     None
 }
 
-/// Generate shell completion script bytes for the given shell, including norbctl aliases.
+/// Generate shell completion script bytes for the given shell, including machctl aliases.
 pub fn generate_shell_script(shell: Shell) -> Vec<u8> {
     let mut cmd = Cli::command();
     let mut buf = Vec::new();
-    generate(shell, &mut cmd, "norb", &mut buf);
+    generate(shell, &mut cmd, "mach", &mut buf);
 
-    // Also register completion for norbctl so that both CLI entrypoints benefit
+    // Also register completion for machctl so that both CLI entrypoints benefit
     match shell {
         Shell::Zsh => {
             buf.extend_from_slice(
-                b"\n# Enable completions for norbctl as well\nif (( $+functions[compdef] )); then\n    compdef _norb norbctl 2>/dev/null || true\nfi\n",
+                b"\n# Enable completions for machctl as well\nif (( $+functions[compdef] )); then\n    compdef _mach machctl 2>/dev/null || true\nfi\n",
             );
         }
         Shell::Bash => {
             buf.extend_from_slice(
-                b"\n# Enable completions for norbctl as well\nif type complete >/dev/null 2>&1; then\n    complete -F _norb -o bashdefault -o default norbctl 2>/dev/null || true\nfi\n",
+                b"\n# Enable completions for machctl as well\nif type complete >/dev/null 2>&1; then\n    complete -F _mach -o bashdefault -o default machctl 2>/dev/null || true\nfi\n",
             );
         }
         Shell::Fish => {
             buf.extend_from_slice(
-                b"\n# Enable completions for norbctl as well\ncomplete -c norbctl -w norb\n",
+                b"\n# Enable completions for machctl as well\ncomplete -c machctl -w mach\n",
             );
         }
         _ => {}
@@ -74,7 +74,7 @@ pub fn generate_shell_script(shell: Shell) -> Vec<u8> {
     buf
 }
 
-/// Install zsh completion to `~/.zfunc/_norb` or `~/.zsh/completion/_norb`.
+/// Install zsh completion to `~/.zfunc/_mach` or `~/.zsh/completion/_mach`.
 pub fn install_zsh(home: &Path) -> Result<PathBuf> {
     let script = generate_shell_script(Shell::Zsh);
     let zsh_comp_dir = home.join(".zsh").join("completion");
@@ -89,7 +89,7 @@ pub fn install_zsh(home: &Path) -> Result<PathBuf> {
     fs::create_dir_all(&target_dir)
         .with_context(|| format!("failed to create directory {}", target_dir.display()))?;
 
-    let dest = target_dir.join("_norb");
+    let dest = target_dir.join("_mach");
     fs::write(&dest, &script)
         .with_context(|| format!("failed to write {}", dest.display()))?;
 
@@ -100,7 +100,7 @@ pub fn install_zsh(home: &Path) -> Result<PathBuf> {
         home.join(".zsh").join("completion")
     };
     if other_dir.exists() {
-        let _ = fs::write(other_dir.join("_norb"), &script);
+        let _ = fs::write(other_dir.join("_mach"), &script);
     }
 
     Ok(dest)
@@ -123,14 +123,14 @@ fn print_zsh_instructions(file: &Path) {
     println!("    exec zsh");
 }
 
-/// Install bash completion to `~/.bash_completion.d/norb`.
+/// Install bash completion to `~/.bash_completion.d/mach`.
 pub fn install_bash(home: &Path) -> Result<PathBuf> {
     let script = generate_shell_script(Shell::Bash);
     let bash_dir = home.join(".bash_completion.d");
     fs::create_dir_all(&bash_dir)
         .with_context(|| format!("failed to create directory {}", bash_dir.display()))?;
 
-    let dest = bash_dir.join("norb");
+    let dest = bash_dir.join("mach");
     fs::write(&dest, &script)
         .with_context(|| format!("failed to write {}", dest.display()))?;
 
@@ -143,20 +143,20 @@ fn print_bash_instructions(file: &Path) {
     println!();
     println!("To activate completions, add the following to your ~/.bashrc (or ~/.bash_profile):");
     println!();
-    println!("    [[ -r ~/.bash_completion.d/norb ]] && source ~/.bash_completion.d/norb");
+    println!("    [[ -r ~/.bash_completion.d/mach ]] && source ~/.bash_completion.d/mach");
     println!();
     println!("Then reload your shell:");
     println!("    source ~/.bashrc");
 }
 
-/// Install fish completion to `~/.config/fish/completions/norb.fish`.
+/// Install fish completion to `~/.config/fish/completions/mach.fish`.
 pub fn install_fish(home: &Path) -> Result<PathBuf> {
     let script = generate_shell_script(Shell::Fish);
     let fish_dir = home.join(".config").join("fish").join("completions");
     fs::create_dir_all(&fish_dir)
         .with_context(|| format!("failed to create directory {}", fish_dir.display()))?;
 
-    let dest = fish_dir.join("norb.fish");
+    let dest = fish_dir.join("mach.fish");
     fs::write(&dest, &script)
         .with_context(|| format!("failed to write {}", dest.display()))?;
 
@@ -246,7 +246,7 @@ pub fn generate_completion(shell_str: &str, install: bool) -> Result<()> {
             }
             other => {
                 bail!(
-                    "Direct installation is not supported for '{other}'. Use `norb completion {other}` to output completion script."
+                    "Direct installation is not supported for '{other}'. Use `mach completion {other}` to output completion script."
                 );
             }
         }
@@ -302,24 +302,24 @@ mod tests {
     fn test_generate_zsh_script() {
         let script = generate_shell_script(Shell::Zsh);
         let s = String::from_utf8_lossy(&script);
-        assert!(s.contains("#compdef norb") || s.contains("_norb"));
-        assert!(s.contains("norbctl"));
+        assert!(s.contains("#compdef mach") || s.contains("_mach"));
+        assert!(s.contains("machctl"));
     }
 
     #[test]
     fn test_generate_bash_script() {
         let script = generate_shell_script(Shell::Bash);
         let s = String::from_utf8_lossy(&script);
-        assert!(s.contains("_norb"));
-        assert!(s.contains("norbctl"));
+        assert!(s.contains("_mach"));
+        assert!(s.contains("machctl"));
     }
 
     #[test]
     fn test_generate_fish_script() {
         let script = generate_shell_script(Shell::Fish);
         let s = String::from_utf8_lossy(&script);
-        assert!(s.contains("complete -c norb"));
-        assert!(s.contains("norbctl"));
+        assert!(s.contains("complete -c mach"));
+        assert!(s.contains("machctl"));
     }
 
     #[test]

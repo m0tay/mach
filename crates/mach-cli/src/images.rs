@@ -1,4 +1,4 @@
-//! Multi-distro image manager and cache for Norb.
+//! Multi-distro image manager and cache for Mach.
 
 use anyhow::{bail, Context, Result};
 use std::fs;

@@ -1,4 +1,4 @@
-//! VM descriptor types used throughout the Norb workspace.
+//! VM descriptor types used throughout the Mach workspace.
 //!
 //! The central types are:
 //! - [`MachineState`]  — lifecycle state machine for a VM
@@ -13,13 +13,13 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub use crate::config::atomic_write;
-use crate::error::{NorbError, Result};
+use crate::error::{MachError, Result};
 
 // ---------------------------------------------------------------------------
 // MachineState
 // ---------------------------------------------------------------------------
 
-/// The lifecycle state of a Norb virtual machine.
+/// The lifecycle state of a Mach virtual machine.
 ///
 /// The valid transitions are:
 ///
@@ -76,7 +76,7 @@ pub enum Architecture {
     X86_64,
 }
 
-/// Defaults to [`Architecture::Aarch64`] since Norb targets Apple Silicon.
+/// Defaults to [`Architecture::Aarch64`] since Mach targets Apple Silicon.
 impl Default for Architecture {
     fn default() -> Self {
         Self::Aarch64
@@ -133,10 +133,10 @@ pub struct MachineConfig {
 // Machine
 // ---------------------------------------------------------------------------
 
-/// Runtime descriptor for a Norb virtual machine.
+/// Runtime descriptor for a Mach virtual machine.
 ///
 /// Instances are created via [`Machine::new`] and persisted as JSON inside
-/// `~/.norb/machines/<id>/machine.json`.  The [`state`](Machine::state) and
+/// `~/.mach/machines/<id>/machine.json`.  The [`state`](Machine::state) and
 /// [`pid`](Machine::pid) fields are updated dynamically by the daemon.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Machine {
@@ -199,7 +199,6 @@ impl Machine {
         self.config.is_system
             || self.config.name == "mach-docker"
             || self.config.name == "mach-k8s"
-            || self.config.name == "norb-k8s"
             || self.config.name == "mach-kubernetes"
     }
 
@@ -207,7 +206,7 @@ impl Machine {
     pub fn system_service_name(&self) -> Option<&'static str> {
         if self.config.name == "mach-docker" {
             Some("Docker")
-        } else if self.config.name == "mach-k8s" || self.config.name == "norb-k8s" || self.config.name == "mach-kubernetes" {
+        } else if self.config.name == "mach-k8s" || self.config.name == "mach-kubernetes" {
             Some("Kubernetes")
         } else if self.config.is_system {
             Some("System")
@@ -229,7 +228,7 @@ pub fn save_machine(machines_dir: &Path, machine: &Machine) -> Result<()> {
     std::fs::create_dir_all(&dir)?;
     let path = dir.join("machine.json");
     let content = serde_json::to_string_pretty(machine)
-        .map_err(|e| NorbError::Machine(format!("failed to serialize machine {}: {e}", machine.config.name)))?;
+        .map_err(|e| MachError::Machine(format!("failed to serialize machine {}: {e}", machine.config.name)))?;
     atomic_write(&path, content.as_bytes())?;
     Ok(())
 }

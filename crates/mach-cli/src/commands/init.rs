@@ -65,7 +65,7 @@ pub async fn run(non_interactive: bool) -> Result<()> {
     if user_ssh_config.exists() {
         // If file exists and doesn't contain Mach block, make a safety backup first
         if let Ok(content) = fs::read_to_string(&user_ssh_config) {
-            if !content.contains("BEGIN MACH MANAGED BLOCK") && !content.contains("BEGIN NORB MANAGED BLOCK") {
+            if !content.contains("BEGIN MACH MANAGED BLOCK") {
                 let backup_path = ssh_dir.join("config.mach-bak");
                 let _ = fs::copy(&user_ssh_config, &backup_path);
                 println!("  \x1b[1;32m✓\x1b[0m Created safety backup of user SSH config at {}", backup_path.display());

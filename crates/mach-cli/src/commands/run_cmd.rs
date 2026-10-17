@@ -1,7 +1,7 @@
-//! `norb run` command implementation (transparent command runner inside VM).
+//! `mach run` command implementation (transparent command runner inside VM).
 
 use anyhow::{bail, Context, Result};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use mach_common::machine::MachineState;
 use std::os::unix::process::ExitStatusExt;
 
@@ -17,7 +17,7 @@ pub async fn run(
         bail!("no command specified to run");
     }
 
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
     let mut effective_cmd = command;
 
     let target_name_opt = match machine_opt {

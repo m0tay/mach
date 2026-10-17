@@ -1,4 +1,4 @@
-//! `norb-vmm` — Virtual Machine Monitor layer for Norb.
+//! `mach-vmm` — Virtual Machine Monitor layer for Mach.
 //!
 //! Orchestrates the hypervisor, memory mapping, device tree generation,
 //! MMIO device dispatching, and guest console I/O.

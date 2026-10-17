@@ -262,7 +262,7 @@ fn handle_request(raw_json: &str) -> BridgeResponse {
 
 /// Script content to be installed in guest at `/usr/local/bin/mac`
 pub const GUEST_MAC_SCRIPT: &str = r#"#!/usr/bin/env bash
-# macOS host bridge client for Norb
+# macOS host bridge client for Mach
 GATEWAY_IP="192.168.64.1"
 PORT=32222
 
@@ -456,7 +456,7 @@ mod tests {
 
     #[test]
     fn test_handle_request_nonexistent_binary() {
-        let json = r#"{"action": "exec", "binary": "norb_nonexistent_binary_xyz", "args": []}"#;
+        let json = r#"{"action": "exec", "binary": "mach_nonexistent_binary_xyz", "args": []}"#;
         let resp = handle_request(json);
         match resp {
             BridgeResponse::ExecResult { exit_code, stderr, .. } => {
@@ -469,12 +469,12 @@ mod tests {
 
     #[test]
     fn test_handle_request_valid_echo() {
-        let json = r#"{"action": "exec", "binary": "echo", "args": ["norb", "bridge", "test"]}"#;
+        let json = r#"{"action": "exec", "binary": "echo", "args": ["mach", "bridge", "test"]}"#;
         let resp = handle_request(json);
         match resp {
             BridgeResponse::ExecResult { exit_code, stdout, .. } => {
                 assert_eq!(exit_code, 0);
-                assert_eq!(stdout.trim(), "norb bridge test");
+                assert_eq!(stdout.trim(), "mach bridge test");
             }
             _ => panic!("Expected ExecResult"),
         }

@@ -1,7 +1,7 @@
 class Mach < Formula
   desc "Supersonic, lightweight Linux virtualization & container engine for Apple Silicon"
   homepage "https://github.com/douglaslobo/mach"
-  url "file:///Users/douglaslobo/Developer/norb/dist/mach-0.1.0-aarch64-apple-darwin.tar.gz"
+  url "file:///Users/douglaslobo/Developer/mach/dist/mach-0.1.0-aarch64-apple-darwin.tar.gz"
   version "0.1.0"
   sha256 "640d147a26f12408376e44929b29005f810cebf32b01424afcc2cb8104ce9c47"
   license "MIT"
@@ -12,8 +12,6 @@ class Mach < Formula
   def install
     bin.install "mach"
     bin.install_symlink "mach" => "machctl"
-    bin.install_symlink "mach" => "norb"
-    bin.install_symlink "mach" => "norbctl"
 
     # Install assets
     (pkgshare/"assets").install Dir["assets/*"]

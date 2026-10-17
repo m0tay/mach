@@ -391,7 +391,7 @@ pub async fn run(interval_secs: u64) -> Result<()> {
         println!("{}", "─".repeat(divider_width));
 
         if rows.is_empty() {
-            println!("  \x1b[2m(No machines configured. Create one with `norb create <distro>`)\x1b[0m");
+            println!("  \x1b[2m(No machines configured. Create one with `mach create <distro>`)\x1b[0m");
         } else {
             for row in rows {
                 let pid_str = row

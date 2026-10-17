@@ -4,18 +4,18 @@ all: build
 
 build:
 	cargo build
-	codesign -s - --entitlements entitlements.plist --force target/debug/norb
+	codesign -s - --entitlements entitlements.plist --force target/debug/mach
 
 release:
 	cargo build --release
-	codesign -s - --entitlements entitlements.plist --force target/release/norb
+	codesign -s - --entitlements entitlements.plist --force target/release/mach
 
 install:
 	./install.sh
 
 uninstall:
-	rm -f $(HOME)/.cargo/bin/norb $(HOME)/.cargo/bin/norbctl
-	@echo "✓ Uninstalled norb and norbctl from $(HOME)/.cargo/bin"
+	rm -f $(HOME)/.cargo/bin/mach $(HOME)/.cargo/bin/machctl
+	@echo "✓ Uninstalled mach and machctl from $(HOME)/.cargo/bin"
 
 test:
 	cargo test

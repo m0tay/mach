@@ -237,8 +237,6 @@ pub struct MachConfig {
     pub socket_path: PathBuf,
 }
 
-pub type NorbConfig = MachConfig;
-
 impl Default for MachConfig {
     fn default() -> Self {
         // Resolve the home directory at construction time so paths are always
@@ -269,44 +267,6 @@ impl Default for MachConfig {
 }
 
 impl MachConfig {
-    /// Ensure automatic migration from legacy `~/.norb` to `~/.mach` if needed.
-    pub fn ensure_migration() {
-        if let Some(home) = dirs::home_dir() {
-            let norb_dir = home.join(".norb");
-            let mach_dir = home.join(".mach");
-            if norb_dir.exists() {
-                if !mach_dir.exists() {
-                    let _ = std::fs::rename(&norb_dir, &mach_dir);
-                } else {
-                    if let Ok(entries) = std::fs::read_dir(&norb_dir) {
-                        for entry in entries.flatten() {
-                            let file_name = entry.file_name();
-                            let target = mach_dir.join(&file_name);
-                            if !target.exists() {
-                                let _ = std::fs::rename(entry.path(), &target);
-                            }
-                        }
-                    }
-                }
-            }
-            let norb_kube = home.join(".kube").join("config.norb");
-            let mach_kube = home.join(".kube").join("config.mach");
-            if norb_kube.exists() && !mach_kube.exists() {
-                let _ = std::fs::copy(&norb_kube, &mach_kube);
-            }
-
-            let cfg_yaml = mach_dir.join("config.yaml");
-            if cfg_yaml.exists() {
-                if let Ok(content) = std::fs::read_to_string(&cfg_yaml) {
-                    if content.contains(".norb") {
-                        let updated = content.replace(".norb", ".mach").replace("norb.local", "mach.local");
-                        let _ = std::fs::write(&cfg_yaml, updated);
-                    }
-                }
-            }
-        }
-    }
-
     /// Returns the canonical path to the primary YAML configuration file.
     ///
     /// This is `<data_dir>/config.yaml`, which resolves to
@@ -327,13 +287,6 @@ impl MachConfig {
 
     /// Synchronize memory fields between `default_memory_mb` and `default_memory_mib` and normalize paths.
     pub fn normalize(&mut self) {
-        if self.data_dir.ends_with(".norb") {
-            if let Some(home) = dirs::home_dir() {
-                self.data_dir = home.join(".mach");
-                self.machines_dir = self.data_dir.join("machines");
-                self.socket_path = self.data_dir.join("run").join("mach.sock");
-            }
-        }
         if self.default_memory_mb != 2048 && self.default_memory_mib == 2048 {
             self.default_memory_mib = self.default_memory_mb;
         } else if self.default_memory_mib != 2048 && self.default_memory_mb == 2048 {
@@ -362,7 +315,6 @@ impl MachConfig {
     /// - [`MachError::Io`]     — file exists but could not be read.
     /// - [`MachError::Config`] — file exists but could not be parsed.
     pub fn load() -> Result<Self> {
-        Self::ensure_migration();
         let default_cfg = Self::default();
         Self::load_from_dir(&default_cfg.data_dir)
     }

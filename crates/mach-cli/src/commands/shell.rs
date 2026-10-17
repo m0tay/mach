@@ -1,18 +1,18 @@
-//! `norb shell` command implementation.
+//! `mach shell` command implementation.
 
 use anyhow::{bail, Context, Result};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use mach_common::machine::MachineState;
 use std::os::unix::process::ExitStatusExt;
 
 pub async fn run(name: Option<&str>, system: bool, command: &[String]) -> Result<()> {
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
 
     let machine = super::resolve_target_machine_ext(&cfg, name, system)?;
 
     if machine.state != MachineState::Running {
         bail!(
-            "machine '{}' is not running (state: {}). Run `norb start {}` first.",
+            "machine '{}' is not running (state: {}). Run `mach start {}` first.",
             machine.config.name,
             machine.state,
             machine.config.name

@@ -19,7 +19,7 @@ pub mod ssh;
 pub mod tls;
 
 use cli::{Cli, Commands, ConfigAction, DaemonAction, DnsAction, DockerAction, K8sAction, TlsAction};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use mach_common::machine::MachineState;
 
 fn print_mach_help() {
@@ -118,7 +118,7 @@ async fn main() -> Result<()> {
         .and_then(|f| f.to_str())
         .unwrap_or("mach");
 
-    let is_ctl = bin_name == "machctl" || bin_name == "norbctl";
+    let is_ctl = bin_name == "machctl";
 
     // Case 1: Zero arguments
     if raw_args.len() == 1 {
@@ -128,7 +128,7 @@ async fn main() -> Result<()> {
         }
 
         // Smart 'mach' zero-args behavior:
-        let cfg = NorbConfig::load()?;
+        let cfg = MachConfig::load()?;
 
         let machines = commands::load_all_machines(&cfg.machines_dir)?;
         let user_machines: Vec<_> = machines.iter().filter(|m| !m.is_system()).collect();
@@ -287,7 +287,7 @@ async fn main() -> Result<()> {
             if sync {
                 commands::ssh::sync().await?;
             } else {
-                let show_details = details || bin_name == "norbctl";
+                let show_details = details || bin_name == "machctl";
                 commands::ssh::run(name.as_deref(), &args, show_details).await?;
             }
         }

@@ -1,7 +1,7 @@
-//! `norb start` command implementation.
+//! `mach start` command implementation.
 
 use anyhow::{bail, Context, Result};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use mach_common::machine::MachineState;
 use std::fs;
 use std::net::IpAddr;
@@ -12,8 +12,8 @@ use tokio::time::sleep;
 
 use super::{find_machine, load_all_machines, save_machine};
 
-/// Resolve kernel and initramfs assets from ~/.norb/assets or repo assets/
-fn resolve_assets(cfg: &NorbConfig) -> Result<(PathBuf, PathBuf)> {
+/// Resolve kernel and initramfs assets from ~/.mach/assets or repo assets/
+fn resolve_assets(cfg: &MachConfig) -> Result<(PathBuf, PathBuf)> {
     let home_assets = cfg.data_dir.join("assets");
     let home_kernel = home_assets.join("kernel");
     let home_initrd = home_assets.join("initrd.cpio.gz");
@@ -30,7 +30,7 @@ fn resolve_assets(cfg: &NorbConfig) -> Result<(PathBuf, PathBuf)> {
     }
 
     bail!(
-        "Norb Linux assets not found in {} or ./assets.\nRun `./scratch/build_rootfs.sh` or check ~/.norb/assets.",
+        "mach Linux assets not found in {} or ./assets.\nRun `./scratch/build_rootfs.sh` or check ~/.mach/assets.",
         home_assets.display()
     );
 }
@@ -162,7 +162,7 @@ fn lookup_dhcp_lease(
 }
 
 pub async fn run(name: Option<&str>) -> Result<()> {
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
 
     let target_name = match name {
         Some(n) => n.to_string(),
@@ -172,7 +172,7 @@ pub async fn run(name: Option<&str>) -> Result<()> {
             } else {
                 let machines = load_all_machines(&cfg.machines_dir)?;
                 if machines.is_empty() {
-                    bail!("no machines found. Run `norb create <distro>` first.");
+                    bail!("no machines found. Run `mach create <distro>` first.");
                 }
                 machines[0].config.name.clone()
             }
@@ -313,7 +313,7 @@ pub async fn run(name: Option<&str>) -> Result<()> {
     }
 
     let mut ssh_ready = false;
-    let base_ssh = crate::ssh::norb_ssh_args();
+    let base_ssh = crate::ssh::mach_ssh_args();
 
     for _ in 0..60 {
         let mut test_args = base_ssh.clone();

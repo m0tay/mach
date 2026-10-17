@@ -182,7 +182,7 @@ pub async fn run() -> Result<()> {
     let context_out = Command::new("docker").args(["context", "ls"]).output();
     if let Ok(out) = context_out {
         let stdout = String::from_utf8_lossy(&out.stdout);
-        if stdout.contains("mach") || stdout.contains("norb") {
+        if stdout.contains("mach") {
             println!("  \x1b[1;32m✓\x1b[0m Docker Context:      'mach' context configured in Docker CLI");
         } else {
             println!("  \x1b[1;33m!\x1b[0m Docker Context:      'mach' context not configured (run `mach docker setup`)");

@@ -1,4 +1,4 @@
-//! `norb-hypervisor` — Safe Rust bindings to Apple's `Hypervisor.framework`.
+//! `mach-hypervisor` — Safe Rust bindings to Apple's `Hypervisor.framework`.
 //!
 //! This crate wraps the low-level CPU virtualization API available on macOS
 //! (ARM64 / Apple Silicon and Intel with VT-x). It exposes three main

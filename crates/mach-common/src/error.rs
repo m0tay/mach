@@ -1,13 +1,13 @@
-//! Unified error type for the Norb VM manager.
+//! Unified error type for the Mach VM manager.
 //!
-//! All public APIs in the Norb workspace return [`Result<T>`], which is an
-//! alias for `std::result::Result<T, NorbError>`.  Downstream crates extend
+//! All public APIs in the Mach workspace return [`Result<T>`], which is an
+//! alias for `std::result::Result<T, MachError>`.  Downstream crates extend
 //! this with their own `From` impls where necessary, but they always convert
-//! into `NorbError` at the boundary so callers only ever see one error type.
+//! into `MachError` at the boundary so callers only ever see one error type.
 
 use thiserror::Error;
 
-/// The top-level error enum used across the entire Norb workspace.
+/// The top-level error enum used across the entire Mach workspace.
 ///
 /// Each variant corresponds to a distinct subsystem.  Variants that wrap a
 /// plain `String` do so intentionally: the subsystem owning that error is
@@ -70,8 +70,6 @@ pub enum MachError {
     #[error("invalid state: resource is in '{current}' but expected '{expected}'")]
     InvalidState { current: String, expected: String },
 }
-
-pub type NorbError = MachError;
 
 /// Convenience alias so every module can write `Result<T>` instead of
 /// `Result<T, MachError>`.

@@ -111,7 +111,7 @@ pub fn resolve_machine_ip(machines_dir: &Path, prefix: &str) -> Ipv4Addr {
     lookup_machine_ip(machines_dir, prefix).unwrap_or(Ipv4Addr::new(127, 0, 0, 1))
 }
 
-/// Encode a domain name into DNS wire format (e.g. "gateway.norb.local" -> "\x07gateway\x04norb\x05local\x00").
+/// Encode a domain name into DNS wire format (e.g. "gateway.mach.local" -> "\x07gateway\x04mach\x05local\x00").
 pub fn encode_dns_name(name: &str) -> Vec<u8> {
     let mut bytes = Vec::new();
     for part in name.split('.') {
@@ -194,10 +194,9 @@ pub fn handle_dns_query(packet: &[u8], machines_dir: &Path) -> Option<Vec<u8>> {
     let domain = labels.join(".");
 
     let is_mach_local = domain.ends_with(".mach.local") || domain == "mach.local";
-    let is_norb_local = domain.ends_with(".norb.local") || domain == "norb.local";
 
-    let record: Option<DnsRecord> = if is_mach_local || is_norb_local {
-        if domain == "mach.local" || domain == "norb.local" {
+    let record: Option<DnsRecord> = if is_mach_local {
+        if domain == "mach.local" {
             Some(DnsRecord::A(Ipv4Addr::new(127, 0, 0, 1)))
         } else {
             let sub_labels = &labels[..labels.len() - 2];
@@ -218,10 +217,8 @@ pub fn handle_dns_query(packet: &[u8], machines_dir: &Path) -> Option<Vec<u8>> {
         }
     } else if domain == "host.docker.internal"
         || domain == "host.mach.internal"
-        || domain == "host.norb.internal"
         || domain == "gateway.docker.internal"
         || domain == "gateway.mach.internal"
-        || domain == "gateway.norb.internal"
     {
         Some(DnsRecord::A(Ipv4Addr::new(192, 168, 64, 1)))
     } else if domain.ends_with(".in-addr.arpa") {
@@ -355,7 +352,7 @@ pub fn check_or_setup_resolver() -> (bool, Option<String>) {
     (false, Some(setup_cmd))
 }
 
-/// Attempt to install `/etc/resolver/mach.local` and `/etc/resolver/norb.local` directly or via sudo.
+/// Attempt to install `/etc/resolver/mach.local` directly or via sudo.
 pub fn install_resolver() -> Result<()> {
     let resolver_dir = Path::new("/etc/resolver");
     let content = "nameserver 127.0.0.1\nport 5354\n";
@@ -363,7 +360,6 @@ pub fn install_resolver() -> Result<()> {
     // 1. Direct write if directory is writable
     if resolver_dir.exists() || std::fs::create_dir_all(resolver_dir).is_ok() {
         let _ = std::fs::write(resolver_dir.join("mach.local"), content);
-        let _ = std::fs::write(resolver_dir.join("norb.local"), content);
         if resolver_dir.join("mach.local").exists() {
             return Ok(());
         }
@@ -374,7 +370,7 @@ pub fn install_resolver() -> Result<()> {
         .args([
             "sh",
             "-c",
-            "mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\\nport 5354\\n' | tee /etc/resolver/mach.local /etc/resolver/norb.local >/dev/null",
+            "mkdir -p /etc/resolver && printf 'nameserver 127.0.0.1\\nport 5354\\n' | tee /etc/resolver/mach.local >/dev/null",
         ])
         .status()
         .context("failed to execute sudo")?;
@@ -525,7 +521,7 @@ mod tests {
     #[test]
     fn test_dns_cache_resolution() {
         let _lock = TEST_MUTEX.lock().unwrap();
-        let temp_dir = std::env::temp_dir().join("norb_dns_test_cache");
+        let temp_dir = std::env::temp_dir().join("mach_dns_test_cache");
         let _ = std::fs::create_dir_all(&temp_dir);
 
         {
@@ -561,12 +557,6 @@ mod tests {
         assert_eq!(flags, 0x8180);
         assert_eq!(ip, Ipv4Addr::new(192, 168, 64, 1));
 
-        // host.norb.local -> 192.168.64.1
-        let pkt_legacy = make_test_query(11, "host.norb.local", 1);
-        let resp_legacy = handle_dns_query(&pkt_legacy, &temp_dir).expect("should answer");
-        let (_, ip_legacy) = parse_a_response(&resp_legacy).unwrap();
-        assert_eq!(ip_legacy, Ipv4Addr::new(192, 168, 64, 1));
-
         // gateway.mach.local -> 192.168.64.1
         let pkt = make_test_query(2, "gateway.mach.local", 1);
         let resp = handle_dns_query(&pkt, &temp_dir).expect("should answer");
@@ -599,11 +589,6 @@ mod tests {
         let resp = handle_dns_query(&pkt, &temp_dir).expect("should answer");
         let (_, ip) = parse_a_response(&resp).unwrap();
         assert_eq!(ip, Ipv4Addr::new(192, 168, 64, 10));
-
-        let pkt_legacy = make_test_query(101, "ubuntu.norb.local", 1);
-        let resp_legacy = handle_dns_query(&pkt_legacy, &temp_dir).expect("should answer");
-        let (_, ip_legacy) = parse_a_response(&resp_legacy).unwrap();
-        assert_eq!(ip_legacy, Ipv4Addr::new(192, 168, 64, 10));
 
         // Single label container (not a machine) -> 127.0.0.1
         let pkt = make_test_query(11, "redis.mach.local", 1);

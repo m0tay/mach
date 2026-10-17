@@ -1,14 +1,14 @@
-//! Rename an existing Norb machine.
+//! Rename an existing mach machine.
 
 use anyhow::{bail, Result};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use mach_common::machine::MachineState;
 use std::fs;
 
 use crate::commands::{find_machine, save_machine};
 
 pub async fn run(old_name: &str, new_name: &str) -> Result<()> {
-    let mut cfg = NorbConfig::load()?;
+    let mut cfg = MachConfig::load()?;
     let mut machine = match find_machine(&cfg.machines_dir, old_name)? {
         Some(m) => m,
         None => bail!("Machine '{}' does not exist.", old_name),

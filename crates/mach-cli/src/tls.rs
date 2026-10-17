@@ -37,12 +37,12 @@ pub enum KeychainTrustState {
     NotTrusted,
 }
 
-/// Returns the path to the Root CA certificate (`<data_dir>/ssl/norb-root-ca.crt`).
+/// Returns the path to the Root CA certificate (`<data_dir>/ssl/mach-root-ca.crt`).
 pub fn ca_cert_path(data_dir: &Path) -> PathBuf {
     data_dir.join("ssl").join(ROOT_CA_CERT_NAME)
 }
 
-/// Returns the path to the Root CA private key (`<data_dir>/ssl/norb-root-ca.key`).
+/// Returns the path to the Root CA private key (`<data_dir>/ssl/mach-root-ca.key`).
 pub fn ca_key_path(data_dir: &Path) -> PathBuf {
     data_dir.join("ssl").join(ROOT_CA_KEY_NAME)
 }
@@ -57,7 +57,7 @@ pub fn key_path(data_dir: &Path) -> PathBuf {
     data_dir.join("ssl").join(LEAF_KEY_NAME)
 }
 
-/// Ensure local persistent Root CA exists in `<data_dir>/ssl/norb-root-ca.crt` & key.
+/// Ensure local persistent Root CA exists in `<data_dir>/ssl/mach-root-ca.crt` & key.
 /// Valid for 10 years (3650 days).
 pub fn ensure_ca_cert(data_dir: &Path) -> Result<(PathBuf, PathBuf)> {
     let ssl_dir = data_dir.join("ssl");
@@ -74,8 +74,8 @@ pub fn ensure_ca_cert(data_dir: &Path) -> Result<(PathBuf, PathBuf)> {
     Ok((ca_crt, ca_key))
 }
 
-/// Ensure local wildcard TLS certificate exists for `*.norb.local`, `norb.local`, and `127.0.0.1`,
-/// signed by the persistent Norb Root CA.
+/// Ensure local wildcard TLS certificate exists for `*.mach.local`, `mach.local`, and `127.0.0.1`,
+/// signed by the persistent Mach Root CA.
 pub fn ensure_tls_cert(data_dir: &Path) -> Result<TlsConfig> {
     let ssl_dir = data_dir.join("ssl");
     fs::create_dir_all(&ssl_dir)
@@ -94,7 +94,7 @@ pub fn ensure_tls_cert(data_dir: &Path) -> Result<TlsConfig> {
         generate_wildcard_cert(&ca_cert_path, &ca_key_path, &leaf_cert, &leaf_key)?;
     }
 
-    // Ensure alias files exist (norb-wildcard.crt / norb-wildcard.key)
+    // Ensure alias files exist (mach-wildcard.crt / mach-wildcard.key)
     let alias_cert = ssl_dir.join(WILDCARD_CERT_ALIAS);
     let alias_key = ssl_dir.join(WILDCARD_KEY_ALIAS);
     if !alias_cert.exists() && leaf_cert.exists() {
@@ -114,7 +114,7 @@ pub fn ensure_tls_cert(data_dir: &Path) -> Result<TlsConfig> {
 
 /// Generates a self-signed Root CA valid for 10 years (3650 days).
 fn generate_root_ca(ca_cert: &Path, ca_key: &Path) -> Result<()> {
-    println!("\x1b[1;36m➜\x1b[0m Generating persistent Norb Root CA in {}...", ca_cert.display());
+    println!("\x1b[1;36m➜\x1b[0m Generating persistent mach Root CA in {}...", ca_cert.display());
 
     let output = Command::new("/usr/bin/openssl")
         .args([
@@ -224,9 +224,7 @@ subjectAltName=@alt_names
 [alt_names]
 DNS.1 = *.mach.local
 DNS.2 = mach.local
-DNS.3 = *.norb.local
-DNS.4 = norb.local
-DNS.5 = localhost
+DNS.3 = localhost
 IP.1 = 127.0.0.1
 ";
     fs::write(&ext_path, ext_content)
@@ -394,7 +392,7 @@ pub fn verify_cert_chain(ca_cert_path: &Path, leaf_cert_path: &Path) -> bool {
     matches!(output, Ok(out) if out.status.success())
 }
 
-/// Checks whether the Norb Root CA is trusted in the macOS Keychain.
+/// Checks whether the mach Root CA is trusted in the macOS Keychain.
 pub fn check_keychain_trust(ca_cert_path: &Path) -> KeychainTrustState {
     if !ca_cert_path.exists() {
         return KeychainTrustState::NotTrusted;

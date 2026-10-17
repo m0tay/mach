@@ -9,8 +9,6 @@ use std::process::Command;
 
 /// Name of the Mach top-level directory in user home.
 pub const MACH_ROOT_DIR: &str = "Mach";
-/// Legacy alias
-pub const NORB_ROOT_DIR: &str = MACH_ROOT_DIR;
 /// Subdirectory holding VM machine filesystem mounts.
 pub const MACHINES_SUBDIR: &str = "machines";
 /// Subdirectory holding container / persistent volumes.
@@ -50,11 +48,6 @@ pub fn mach_root() -> PathBuf {
         .join(MACH_ROOT_DIR)
 }
 
-/// Backward compatibility alias for `mach_root()`.
-pub fn norb_root() -> PathBuf {
-    mach_root()
-}
-
 /// Returns the standard machines directory `~/Mach/machines`.
 pub fn machines_root() -> PathBuf {
     mach_root().join(MACHINES_SUBDIR)
@@ -65,9 +58,9 @@ pub fn volumes_root() -> PathBuf {
     mach_root().join(VOLUMES_SUBDIR)
 }
 
-/// Ensures the Unified Finder Hierarchy (`~/Norb/machines` and `~/Norb/volumes`) exists.
+/// Ensures the Unified Finder Hierarchy (`~/Mach/machines` and `~/Mach/volumes`) exists.
 pub fn ensure_finder_hierarchy() -> Result<FinderHierarchy> {
-    ensure_finder_hierarchy_at(&norb_root())
+    ensure_finder_hierarchy_at(&mach_root())
 }
 
 /// Ensures the Unified Finder Hierarchy exists at a custom root directory.
@@ -90,9 +83,9 @@ pub fn ensure_finder_hierarchy_at(root: &Path) -> Result<FinderHierarchy> {
 }
 
 /// Resolve the primary mount destination and optional alias symlink for a machine.
-/// Supports both canonical `~/Norb/machines/<name>` and direct `~/Norb/<name>`.
+/// Supports both canonical `~/Mach/machines/<name>` and direct `~/Mach/<name>`.
 pub fn resolve_mount_paths(name: &str, target: Option<&Path>) -> (PathBuf, Option<PathBuf>) {
-    resolve_mount_paths_at(&norb_root(), name, target)
+    resolve_mount_paths_at(&mach_root(), name, target)
 }
 
 /// Resolve mount paths at a specified root directory.
@@ -104,17 +97,17 @@ pub fn resolve_mount_paths_at(root: &Path, name: &str, target: Option<&Path>) ->
     if let Some(t) = target {
         let t_buf = t.to_path_buf();
         if t_buf == legacy_dir {
-            // Target explicitly set to ~/Norb/<name> -> alias is machines/<name>
+            // Target explicitly set to ~/Mach/<name> -> alias is machines/<name>
             (t_buf, Some(canonical_machine_dir))
         } else if t_buf == canonical_machine_dir {
-            // Target explicitly set to ~/Norb/machines/<name> -> alias is ~/Norb/<name>
+            // Target explicitly set to ~/Mach/machines/<name> -> alias is ~/Mach/<name>
             (t_buf, Some(legacy_dir))
         } else {
             // Custom target path -> alias link in machines/<name>
             (t_buf, Some(canonical_machine_dir))
         }
     } else {
-        // Default: canonical path is ~/Norb/machines/<name>, alias is ~/Norb/<name>
+        // Default: canonical path is ~/Mach/machines/<name>, alias is ~/Mach/<name>
         (canonical_machine_dir, Some(legacy_dir))
     }
 }
@@ -449,7 +442,7 @@ mod tests {
 
     #[test]
     fn test_finder_hierarchy_creation() {
-        let temp_dir = std::env::temp_dir().join(format!("norb-test-hierarchy-{}", uuid::Uuid::new_v4()));
+        let temp_dir = std::env::temp_dir().join(format!("mach-test-hierarchy-{}", uuid::Uuid::new_v4()));
         let hierarchy = ensure_finder_hierarchy_at(&temp_dir).unwrap();
 
         assert_eq!(hierarchy.root, temp_dir);
@@ -465,26 +458,26 @@ mod tests {
 
     #[test]
     fn test_resolve_mount_paths_default() {
-        let root = Path::new("/mock/home/Norb");
+        let root = Path::new("/mock/home/Mach");
         let (primary, alias) = resolve_mount_paths_at(root, "ubuntu", None);
 
-        assert_eq!(primary, PathBuf::from("/mock/home/Norb/machines/ubuntu"));
-        assert_eq!(alias, Some(PathBuf::from("/mock/home/Norb/ubuntu")));
+        assert_eq!(primary, PathBuf::from("/mock/home/Mach/machines/ubuntu"));
+        assert_eq!(alias, Some(PathBuf::from("/mock/home/Mach/ubuntu")));
     }
 
     #[test]
     fn test_resolve_mount_paths_explicit_legacy() {
-        let root = Path::new("/mock/home/Norb");
-        let target = Path::new("/mock/home/Norb/ubuntu");
+        let root = Path::new("/mock/home/Mach");
+        let target = Path::new("/mock/home/Mach/ubuntu");
         let (primary, alias) = resolve_mount_paths_at(root, "ubuntu", Some(target));
 
-        assert_eq!(primary, PathBuf::from("/mock/home/Norb/ubuntu"));
-        assert_eq!(alias, Some(PathBuf::from("/mock/home/Norb/machines/ubuntu")));
+        assert_eq!(primary, PathBuf::from("/mock/home/Mach/ubuntu"));
+        assert_eq!(alias, Some(PathBuf::from("/mock/home/Mach/machines/ubuntu")));
     }
 
     #[test]
     fn test_setup_alias_symlink() {
-        let temp_dir = std::env::temp_dir().join(format!("norb-test-symlink-{}", uuid::Uuid::new_v4()));
+        let temp_dir = std::env::temp_dir().join(format!("mach-test-symlink-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&temp_dir).unwrap();
         let target_dir = temp_dir.join("target");
         fs::create_dir_all(&target_dir).unwrap();
@@ -506,6 +499,6 @@ mod tests {
         // Root filesystem "/" is always mounted on macOS
         assert!(is_mounted(Path::new("/")));
         // Nonexistent test path should not be mounted
-        assert!(!is_mounted(Path::new("/tmp/norb_nonexistent_mount_test_12345")));
+        assert!(!is_mounted(Path::new("/tmp/mach_nonexistent_mount_test_12345")));
     }
 }

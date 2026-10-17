@@ -15,12 +15,6 @@ if [[ -f "$CARGO_BIN" ]]; then
     MACHCTL_BIN="${CARGO_HOME:-$HOME/.cargo}/bin/machctl"
     ln -sf "$CARGO_BIN" "$MACHCTL_BIN"
 
-    # Also keep legacy symlinks so existing muscle memory never breaks
-    NORB_BIN="${CARGO_HOME:-$HOME/.cargo}/bin/norb"
-    NORBCTL_BIN="${CARGO_HOME:-$HOME/.cargo}/bin/norbctl"
-    ln -sf "$CARGO_BIN" "$NORB_BIN"
-    ln -sf "$CARGO_BIN" "$NORBCTL_BIN"
-
     # Install man pages to ~/.local/share/man/man1 if directory exists or /usr/local/share/man
     MAN_DIR="${HOME}/.local/share/man/man1"
     mkdir -p "$MAN_DIR"

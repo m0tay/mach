@@ -177,7 +177,7 @@ pub struct VirtioMmioDesc {
     pub size: u64,
 }
 
-/// Build a complete Flattened Device Tree for booting ARM64 Linux on Norb.
+/// Build a complete Flattened Device Tree for booting ARM64 Linux on Mach.
 pub fn build_fdt(
     ram_base: u64,
     ram_size: u64,

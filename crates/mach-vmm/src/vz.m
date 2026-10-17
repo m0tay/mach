@@ -141,12 +141,7 @@ int vz_start_vm(
                 [fsConfig setShare:share];
                 [dirSharing addObject:fsConfig];
 
-                // Legacy tag support for backward compatibility with machines created as norb_share
-                VZVirtioFileSystemDeviceConfiguration *legacyFsConfig = [[VZVirtioFileSystemDeviceConfiguration alloc] initWithTag:@"norb_share"];
-                [legacyFsConfig setShare:share];
-                [dirSharing addObject:legacyFsConfig];
-
-                NSLog(@"[mach-vmm] VirtioFS shared folder attached: %s (tags: mach_share, norb_share)", shared_dir_path);
+                NSLog(@"[mach-vmm] VirtioFS shared folder attached: %s (tag: mach_share)", shared_dir_path);
             }
         }
 

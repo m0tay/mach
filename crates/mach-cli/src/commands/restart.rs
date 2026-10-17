@@ -1,4 +1,4 @@
-//! `norb restart` command implementation.
+//! `mach restart` command implementation.
 
 use anyhow::Result;
 use std::time::Duration;

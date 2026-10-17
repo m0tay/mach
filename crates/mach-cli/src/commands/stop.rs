@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use mach_common::machine::MachineState;
 
 use super::{find_machine, load_all_machines, save_machine};
@@ -31,7 +31,7 @@ fn terminate_docker_ssh_tunnel(ip_opt: Option<&str>) {
 
 fn stop_single_machine(
     machine: &mut mach_common::machine::Machine,
-    cfg: &NorbConfig,
+    cfg: &MachConfig,
     force: bool,
 ) -> Result<()> {
     println!("\x1b[1;36m➜\x1b[0m Stopping machine \x1b[1m{}\x1b[0m...", machine.config.name);
@@ -48,7 +48,7 @@ fn stop_single_machine(
 
         if !force {
             let mut cmd = std::process::Command::new("ssh");
-            cmd.args(crate::ssh::norb_ssh_args());
+            cmd.args(crate::ssh::mach_ssh_args());
             cmd.args([
                 "-o", "ConnectTimeout=2",
                 &format!("root@{ip}"),
@@ -104,7 +104,7 @@ fn stop_single_machine(
 }
 
 pub async fn run(name: Option<&str>, force: bool, system: bool) -> Result<()> {
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
 
     let target_name = match name {
         Some(n) => n.to_string(),

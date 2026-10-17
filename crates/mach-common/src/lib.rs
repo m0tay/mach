@@ -1,9 +1,9 @@
-//! `norb-common` — shared types, errors, configuration, and utilities
-//! used across every crate in the Norb VM manager workspace.
+//! `mach-common` — shared types, errors, configuration, and utilities
+//! used across every crate in the Mach VM manager workspace.
 //!
 //! # Modules
-//! - [`error`]   — unified [`NorbError`](error::NorbError) type and [`Result`](error::Result) alias
-//! - [`config`]  — [`NorbConfig`](config::NorbConfig) (load / save from `~/.norb/config.json`)
+//! - [`error`]   — unified [`MachError`](error::MachError) type and [`Result`](error::Result) alias
+//! - [`config`]  — [`MachConfig`](config::MachConfig) (load / save from `~/.mach/config.yaml`)
 //! - [`machine`] — VM descriptor types ([`Machine`](machine::Machine), states, architecture …)
 //! - [`logging`] — one-shot [`init_logging`](logging::init_logging) helper
 

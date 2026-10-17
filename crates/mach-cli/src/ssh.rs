@@ -1,4 +1,4 @@
-//! SSH identity management for Norb machines.
+//! SSH identity management for mach machines.
 
 use anyhow::{bail, Context, Result};
 use std::fs;
@@ -15,18 +15,6 @@ pub fn ensure_mach_ssh_key() -> Result<PathBuf> {
 
     let priv_key = ssh_dir.join("id_ed25519");
     let pub_key = ssh_dir.join("id_ed25519.pub");
-
-    // Also check legacy ~/.norb/ssh if needed
-    if !priv_key.exists() {
-        if let Some(home) = dirs::home_dir() {
-            let legacy_priv = home.join(".norb/ssh/id_ed25519");
-            let legacy_pub = home.join(".norb/ssh/id_ed25519.pub");
-            if legacy_priv.exists() && legacy_pub.exists() {
-                let _ = fs::copy(&legacy_priv, &priv_key);
-                let _ = fs::copy(&legacy_pub, &pub_key);
-            }
-        }
-    }
 
     if !priv_key.exists() || !pub_key.exists() {
         let _ = fs::remove_file(&priv_key);
@@ -50,8 +38,6 @@ pub fn ensure_mach_ssh_key() -> Result<PathBuf> {
     Ok(priv_key)
 }
 
-pub use ensure_mach_ssh_key as ensure_norb_ssh_key;
-
 /// Returns standard SSH arguments for non-interactive Mach commands.
 pub fn mach_ssh_args() -> Vec<String> {
     let mut args = vec![
@@ -69,8 +55,6 @@ pub fn mach_ssh_args() -> Vec<String> {
     args
 }
 
-pub use mach_ssh_args as norb_ssh_args;
-
 /// Create a pre-configured SSH Command targeting `user@ip`.
 /// Configures `-o StrictHostKeyChecking=no`, `-o UserKnownHostsFile=/dev/null`, `-o LogLevel=ERROR`,
 /// includes Mach dedicated SSH key, and targets `user@ip`.
@@ -84,7 +68,7 @@ pub fn new_ssh_command(ip: &IpAddr, user: &str) -> Command {
 /// Mach managed SSH configuration block.
 pub const MACH_SSH_CONFIG_BLOCK: &str = "\
 # BEGIN MACH MANAGED BLOCK
-Host *.mach.local *.mach mach *.norb.local *.norb norb
+Host *.mach.local *.mach mach
     User root
     IdentityFile ~/.mach/ssh/id_ed25519
     StrictHostKeyChecking no
@@ -92,32 +76,14 @@ Host *.mach.local *.mach mach *.norb.local *.norb norb
     ForwardAgent yes
 # END MACH MANAGED BLOCK";
 
-pub const NORB_SSH_CONFIG_BLOCK: &str = MACH_SSH_CONFIG_BLOCK;
-
 /// Idempotently update or insert the Mach managed block within an SSH config string.
 pub fn update_ssh_config_content(content: &str) -> String {
     const BEGIN_MARKER: &str = "# BEGIN MACH MANAGED BLOCK";
     const END_MARKER: &str = "# END MACH MANAGED BLOCK";
-    const LEGACY_BEGIN_MARKER: &str = "# BEGIN NORB MANAGED BLOCK";
-    const LEGACY_END_MARKER: &str = "# END NORB MANAGED BLOCK";
 
     if let (Some(start), Some(end)) = (content.find(BEGIN_MARKER), content.find(END_MARKER)) {
         if start <= end {
             let block_end = end + END_MARKER.len();
-            let mut result = String::with_capacity(content.len() + MACH_SSH_CONFIG_BLOCK.len());
-            result.push_str(&content[..start]);
-            result.push_str(MACH_SSH_CONFIG_BLOCK);
-            result.push_str(&content[block_end..]);
-            if !result.ends_with('\n') {
-                result.push('\n');
-            }
-            return result;
-        }
-    }
-
-    if let (Some(start), Some(end)) = (content.find(LEGACY_BEGIN_MARKER), content.find(LEGACY_END_MARKER)) {
-        if start <= end {
-            let block_end = end + LEGACY_END_MARKER.len();
             let mut result = String::with_capacity(content.len() + MACH_SSH_CONFIG_BLOCK.len());
             result.push_str(&content[..start]);
             result.push_str(MACH_SSH_CONFIG_BLOCK);
@@ -154,7 +120,7 @@ pub async fn sync_ssh_config() -> Result<()> {
     sync_ssh_config_to_dir(&ssh_dir)
 }
 
-/// Synchronize the Norb managed block in the given SSH directory (typically `~/.ssh`).
+/// Synchronize the mach managed block in the given SSH directory (typically `~/.ssh`).
 pub fn sync_ssh_config_to_dir(ssh_dir: &std::path::Path) -> Result<()> {
     if !ssh_dir.exists() {
         fs::create_dir_all(ssh_dir).context("failed to create ssh directory")?;
@@ -213,7 +179,7 @@ mod tests {
     fn test_update_ssh_config_empty() {
         let updated = update_ssh_config_content("");
         assert!(updated.contains("# BEGIN MACH MANAGED BLOCK"));
-        assert!(updated.contains("Host *.mach.local *.mach mach *.norb.local *.norb norb"));
+        assert!(updated.contains("Host *.mach.local *.mach mach"));
         assert!(updated.contains("IdentityFile ~/.mach/ssh/id_ed25519"));
         assert!(updated.contains("ForwardAgent yes"));
         assert!(updated.contains("# END MACH MANAGED BLOCK"));
@@ -241,7 +207,7 @@ mod tests {
         let original = "Host github.com\n    User git\n\n# BEGIN MACH MANAGED BLOCK\nHost old-config\n# END MACH MANAGED BLOCK\n\nHost work\n    User dev\n";
         let updated = update_ssh_config_content(original);
         assert!(updated.contains("Host github.com\n    User git\n"));
-        assert!(updated.contains("Host *.mach.local *.mach mach *.norb.local *.norb norb"));
+        assert!(updated.contains("Host *.mach.local *.mach mach"));
         assert!(updated.contains("Host work\n    User dev\n"));
         assert!(!updated.contains("Host old-config"));
 
@@ -251,7 +217,7 @@ mod tests {
     }
 
     #[test]
-    fn test_norb_ssh_args_ssh_auth_sock() {
+    fn test_mach_ssh_args_ssh_auth_sock() {
         std::env::set_var("SSH_AUTH_SOCK", "/tmp/test-ssh-agent.sock");
         let args = mach_ssh_args();
         assert!(args.contains(&"-A".to_string()));

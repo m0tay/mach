@@ -33,16 +33,16 @@ mod tests {
 
     #[test]
     fn test_apfs_clone() {
-        let temp_dir = std::env::temp_dir().join(format!("norb_test_apfs_{}", std::process::id()));
+        let temp_dir = std::env::temp_dir().join(format!("mach_test_apfs_{}", std::process::id()));
         let _ = std::fs::create_dir_all(&temp_dir);
         let src = temp_dir.join("test_src.txt");
         let dst = temp_dir.join("test_dst.txt");
 
-        std::fs::write(&src, b"hello norb apfs").unwrap();
+        std::fs::write(&src, b"hello mach apfs").unwrap();
         apfs_clone(&src, &dst).unwrap();
 
         let content = std::fs::read(&dst).unwrap();
-        assert_eq!(content, b"hello norb apfs");
+        assert_eq!(content, b"hello mach apfs");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

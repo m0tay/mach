@@ -1,12 +1,12 @@
-//! `norb default` command implementation.
+//! `mach default` command implementation.
 
 use anyhow::{bail, Result};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 
 use super::{find_machine, load_all_machines};
 
 pub async fn run(name: Option<&str>) -> Result<()> {
-    let mut cfg = NorbConfig::load()?;
+    let mut cfg = MachConfig::load()?;
 
     match name {
         Some(machine_name) => {
@@ -25,7 +25,7 @@ pub async fn run(name: Option<&str>) -> Result<()> {
                 if let Some(first) = machines.first() {
                     println!("{} (auto-detected)", first.config.name);
                 } else {
-                    println!("No default machine set. Create one with `norb create <distro>`.");
+                    println!("No default machine set. Create one with `mach create <distro>`.");
                 }
             }
         }

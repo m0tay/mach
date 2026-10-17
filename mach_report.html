@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Norb vs. OrbStack: Comprehensive Architecture & Parity Audit</title>
+  <title>mach vs. OrbStack: Comprehensive Architecture & Parity Audit</title>
   <style>
     :root {
       --bg: #0d1117;
@@ -235,9 +235,9 @@
   <div class="container">
     <header>
       <div class="badge badge-success">✓ 100% REAL-DEAL VERIFIED</div>
-      <h1>Norb vs. OrbStack: Architectural & Parity Report</h1>
+      <h1>mach vs. OrbStack: Architectural & Parity Report</h1>
       <p class="subtitle">
-        A deep comparative analysis of Norb—the lightweight, zero-overhead macOS virtualization and container engine in Rust—measuring exact feature parity, developer ergonomics, and native architectural advantages over OrbStack.
+        A deep comparative analysis of mach—the lightweight, zero-overhead macOS virtualization and container engine in Rust—measuring exact feature parity, developer ergonomics, and native architectural advantages over OrbStack.
       </p>
     </header>
 
@@ -261,31 +261,31 @@
     </div>
 
     <section>
-      <h2>Executive Summary: How Much is Norb Equal vs. Different?</h2>
+      <h2>Executive Summary: How Much is mach Equal vs. Different?</h2>
       <p>
-        <strong>Norb</strong> achieves <strong>100% developer workflow parity</strong> with OrbStack while departing fundamentally from OrbStack's proprietary, closed-source design in favor of modern, native Apple Silicon system primitives.
+        <strong>mach</strong> achieves <strong>100% developer workflow parity</strong> with OrbStack while departing fundamentally from OrbStack's proprietary, closed-source design in favor of modern, native Apple Silicon system primitives.
       </p>
       <div class="grid-2">
         <div class="feature-card">
           <h3><span class="tag tag-equal">Common Interface</span> Exact OrbStack Parity (Equal)</h3>
           <ul style="padding-left: 1.25rem; margin-top: 0.5rem;">
-            <li><strong>Dual-Mode CLI</strong>: <code>norb</code> short runner (<code>norb uname -a</code>) and <code>norbctl</code> administration (<code>clone</code>, <code>rename</code>, <code>top</code>, <code>debug</code>, <code>mount</code>, <code>k8s</code>).</li>
-            <li><strong>Standard Docker Drop-In</strong>: <code>docker --context norb</code> pointing to <code>~/.norb/run/docker.sock</code> with dynamic port forwarding to <code>127.0.0.1:PORT</code>.</li>
-            <li><strong>Local Domain Routing</strong>: Automatic HTTP/HTTPS routing for <code>*.norb.local</code>, multi-level compose <code>&lt;svc&gt;.&lt;proj&gt;.norb.local</code>, and <code>@port</code> overrides.</li>
+            <li><strong>Dual-Mode CLI</strong>: <code>mach</code> short runner (<code>mach uname -a</code>) and <code>machctl</code> administration (<code>clone</code>, <code>rename</code>, <code>top</code>, <code>debug</code>, <code>mount</code>, <code>k8s</code>).</li>
+            <li><strong>Standard Docker Drop-In</strong>: <code>docker --context mach</code> pointing to <code>~/.mach/run/docker.sock</code> with dynamic port forwarding to <code>127.0.0.1:PORT</code>.</li>
+            <li><strong>Local Domain Routing</strong>: Automatic HTTP/HTTPS routing for <code>*.mach.local</code>, multi-level compose <code>&lt;svc&gt;.&lt;proj&gt;.mach.local</code>, and <code>@port</code> overrides.</li>
             <li><strong>Apple Silicon Rosetta 2</strong>: Hardware-accelerated x86_64 container and Linux binary execution inside ARM64 guests via <code>binfmt_misc</code>.</li>
-            <li><strong>Local Kubernetes (K3s)</strong>: One-command cluster provisioning (<code>norb k8s enable</code>), port 26443 API tunnel, and instant <code>kubectl</code> compatibility.</li>
+            <li><strong>Local Kubernetes (K3s)</strong>: One-command cluster provisioning (<code>mach k8s enable</code>), port 26443 API tunnel, and instant <code>kubectl</code> compatibility.</li>
             <li><strong>SSH Agent &amp; Config Forwarding</strong>: Automatic <code>~/.ssh/config</code> managed block and seamless <code>$SSH_AUTH_SOCK</code> forwarding into Linux guests.</li>
           </ul>
         </div>
 
         <div class="feature-card">
-          <h3><span class="tag tag-better">Modern Architecture</span> How Norb is Better (Different)</h3>
+          <h3><span class="tag tag-better">Modern Architecture</span> How mach is Better (Different)</h3>
           <ul style="padding-left: 1.25rem; margin-top: 0.5rem;">
             <li><strong>100% Open Source &amp; Rust</strong>: Zero proprietary lock-in, zero DRM, zero license servers, zero telemetric reporting.</li>
             <li><strong>Native APFS Copy-on-Write</strong>: Sub-millisecond instant disk clones via macOS <code>libc::clonefile</code>—zero duplicate storage until written.</li>
-            <li><strong>Native AppKit Menu Bar (&lt; 3 MB)</strong>: Pure Cocoa <code>NSStatusBar</code> status item (<code> Norb</code>) without bloated Electron or WebKit UI processes.</li>
-            <li><strong>Declarative YAML Engine</strong>: Human-readable <code>~/.norb/config.yaml</code> with intelligent defaults, schema validation, and atomic writes.</li>
-            <li><strong>Non-Invasive Resolver</strong>: Native macOS <code>/etc/resolver/norb.local</code> routing without tampering with system DNS or <code>/etc/hosts</code>.</li>
+            <li><strong>Native AppKit Menu Bar (&lt; 3 MB)</strong>: Pure Cocoa <code>NSStatusBar</code> status item (<code> mach</code>) without bloated Electron or WebKit UI processes.</li>
+            <li><strong>Declarative YAML Engine</strong>: Human-readable <code>~/.mach/config.yaml</code> with intelligent defaults, schema validation, and atomic writes.</li>
+            <li><strong>Non-Invasive Resolver</strong>: Native macOS <code>/etc/resolver/mach.local</code> routing without tampering with system DNS or <code>/etc/hosts</code>.</li>
             <li><strong>True Multi-Distro Micro-VMs</strong>: Cleanly isolated micro-VMs per machine rather than a monolithic black-box container sandbox.</li>
           </ul>
         </div>
@@ -299,7 +299,7 @@
           <tr>
             <th>Capability</th>
             <th>OrbStack (Proprietary)</th>
-            <th>Norb (Modern Native Approach)</th>
+            <th>mach (Modern Native Approach)</th>
             <th>Parity / Advantage</th>
           </tr>
         </thead>
@@ -313,7 +313,7 @@
           <tr>
             <td><strong>CLI Interface</strong></td>
             <td><code>orb</code> (short runner) &amp; <code>orbctl</code> (admin)</td>
-            <td><code>norb</code> (short runner) &amp; <code>norbctl</code> (admin)</td>
+            <td><code>mach</code> (short runner) &amp; <code>machctl</code> (admin)</td>
             <td><span class="tag tag-equal">100% Equal</span> Exact drop-in syntax and ergonomics</td>
           </tr>
           <tr>
@@ -331,19 +331,19 @@
           <tr>
             <td><strong>macOS Menu Bar</strong></td>
             <td>Custom Swift / AppKit UI</td>
-            <td>Pure AppKit <code>NSStatusBar</code> item (<code> Norb</code>)</td>
+            <td>Pure AppKit <code>NSStatusBar</code> item (<code> mach</code>)</td>
             <td><span class="tag tag-better">Better</span> Consumes &lt; 3 MB RAM; displays live VM state &amp; quick actions</td>
           </tr>
           <tr>
             <td><strong>Configuration</strong></td>
             <td>Proprietary internal database / GUI settings</td>
-            <td>Declarative YAML (<code>~/.norb/config.yaml</code>)</td>
+            <td>Declarative YAML (<code>~/.mach/config.yaml</code>)</td>
             <td><span class="tag tag-better">Better</span> Version-controllable, human-readable, atomic writes</td>
           </tr>
           <tr>
             <td><strong>Shell Autocompletion</strong></td>
             <td>Custom installer scripts</td>
-            <td>Built-in <code>norb completion --install</code> (Zsh, Bash, Fish)</td>
+            <td>Built-in <code>mach completion --install</code> (Zsh, Bash, Fish)</td>
             <td><span class="tag tag-equal">Equal</span> Instant tab completion for commands and machines</td>
           </tr>
           <tr>
@@ -355,13 +355,13 @@
           <tr>
             <td><strong>Host Bridge Commands</strong></td>
             <td><code>mac open</code>, <code>mac pbcopy</code>, <code>mac pbpaste</code></td>
-            <td>Localhost TCP bridge (port 32222) + <code>norbctl link</code></td>
+            <td>Localhost TCP bridge (port 32222) + <code>machctl link</code></td>
             <td><span class="tag tag-better">Better</span> Scriptable, secure IP filtering, links host binaries into guests</td>
           </tr>
           <tr>
             <td><strong>Container Debugging</strong></td>
             <td><code>orbctl debug &lt;container&gt;</code></td>
-            <td><code>norbctl debug &lt;container&gt;</code> (netshoot / busybox / alpine)</td>
+            <td><code>machctl debug &lt;container&gt;</code> (netshoot / busybox / alpine)</td>
             <td><span class="tag tag-equal">Equal</span> Multi-tier diagnostic namespace injection</td>
           </tr>
         </tbody>
@@ -375,7 +375,7 @@
       </p>
       <pre>
 ======================================================
-  Norb CLI Primitives Comprehensive Test Suite       
+  mach CLI Primitives Comprehensive Test Suite       
 ======================================================
 [1/15] Version & Help Output ................... ✓ 4/4 Passed
 [2/15] System Doctor Health Checks ............. ✓ 2/2 Passed
@@ -390,13 +390,13 @@
 [11/15] VM Boot & DHCP / SSH Connection ........ ✓ 1/1 Passed
 [12/15] Guest Command Execution (uname) ........ ✓ 2/2 Passed
 [13/15] File Push & Pull ....................... ✓ 2/2 Passed
-[14/15] Norb SSH Details ....................... ✓ 1/1 Passed
+[14/15] mach SSH Details ....................... ✓ 1/1 Passed
 [15/15] VM Stop & Final Cleanup ................ ✓ 2/2 Passed
 ------------------------------------------------------
 CLI Primitives Test Results: 32 Passed, 0 Failed
 
 ======================================================================
-       Norb 'Real-Deal' Live Virtualization & Parity Test Suite       
+       mach 'Real-Deal' Live Virtualization & Parity Test Suite       
 ======================================================================
 [Phase 1] Smart Creation & Auto-Default ........ ✓ 2/2 Passed
 [Phase 2] Real VM Boot, NAT & DNS Ping ......... ✓ 3/3 Passed
@@ -404,7 +404,7 @@ CLI Primitives Test Results: 32 Passed, 0 Failed
 [Phase 4] APFS CoW Disk Isolation .............. ✓ 2/2 Passed
 [Phase 5] Debian 12 Boot & Apple Rosetta 2 ..... ✓ 3/3 Passed
 [Phase 6] Docker Engine & Port Forwarding ...... ✓ 5/5 Passed
-          - Docker context 'norb' configured
+          - Docker context 'mach' configured
           - Docker CLI communicates directly with daemon
           - Native ARM64 container execution
           - Rosetta 2 x86_64 container execution
@@ -419,11 +419,11 @@ Workspace Unit & Doc Tests: 70 Passed, 0 Failed
       <h2>Developer Ergonomics Quickstart</h2>
       <pre>
 # 1. Interactive Linux Shell
-norb
+mach
 
 # 2. Transparent Command Execution
-norb uname -a
-norb cat /etc/os-release
+mach uname -a
+mach cat /etc/os-release
 
 # 3. Docker Drop-In
 docker ps
@@ -431,21 +431,21 @@ docker run --rm -it -p 8080:80 nginx:alpine
 curl http://localhost:8080
 
 # 4. Local Kubernetes Cluster
-norb k8s enable
+mach k8s enable
 kubectl get nodes
 kubectl get pods -A
 
 # 5. Activity Dashboard & macOS Status Item
-norb top
-norb menu &amp;
+mach top
+mach menu &amp;
 
 # 6. Shell Tab Autocompletion
-norb completion --install
+mach completion --install
       </pre>
     </section>
 
     <footer>
-      <p>Norb Project — Apple Silicon Native Virtualization &amp; Container Engine in Rust</p>
+      <p>mach Project — Apple Silicon Native Virtualization &amp; Container Engine in Rust</p>
     </footer>
   </div>
 </body>

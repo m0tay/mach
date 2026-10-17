@@ -9,7 +9,7 @@ use tracing::{debug, warn};
 
 // ── Error type ────────────────────────────────────────────────────────────────
 
-/// All errors that can be returned by the `norb-hypervisor` crate.
+/// All errors that can be returned by the `mach-hypervisor` crate.
 #[derive(Debug, thiserror::Error)]
 pub enum HvError {
     /// The `Hypervisor.framework` returned a non-zero status code.

@@ -12,7 +12,6 @@ use crate::commands::find_machine;
 
 pub const K8S_VM_NAME: &str = "mach-kubernetes";
 pub const ALT_K8S_VM_NAME: &str = "mach-k8s";
-pub const LEGACY_K8S_VM_NAME: &str = "norb-k8s";
 
 pub fn resolve_k8s_machine_name(machines_dir: &std::path::Path) -> Result<String> {
     if find_machine(machines_dir, K8S_VM_NAME)?.is_some() {
@@ -20,9 +19,6 @@ pub fn resolve_k8s_machine_name(machines_dir: &std::path::Path) -> Result<String
     }
     if find_machine(machines_dir, ALT_K8S_VM_NAME)?.is_some() {
         return Ok(ALT_K8S_VM_NAME.to_string());
-    }
-    if find_machine(machines_dir, LEGACY_K8S_VM_NAME)?.is_some() {
-        return Ok(LEGACY_K8S_VM_NAME.to_string());
     }
     Ok(K8S_VM_NAME.to_string())
 }
@@ -206,15 +202,15 @@ pub async fn enable() -> Result<()> {
         let leading_spaces = line.len() - line.trim_start().len();
         let indent = " ".repeat(leading_spaces);
 
-        if trimmed == "name: default" || trimmed == "name: norb" {
+        if trimmed == "name: default" {
             patched_lines.push(format!("{}name: mach", indent));
-        } else if trimmed == "- name: default" || trimmed == "- name: norb" {
+        } else if trimmed == "- name: default" {
             patched_lines.push(format!("{}- name: mach", indent));
-        } else if trimmed == "cluster: default" || trimmed == "cluster: norb" {
+        } else if trimmed == "cluster: default" {
             patched_lines.push(format!("{}cluster: mach", indent));
-        } else if trimmed == "user: default" || trimmed == "user: norb" {
+        } else if trimmed == "user: default" {
             patched_lines.push(format!("{}user: mach", indent));
-        } else if trimmed == "current-context: default" || trimmed == "current-context: norb" {
+        } else if trimmed == "current-context: default" {
             patched_lines.push(format!("{}current-context: mach", indent));
         } else if trimmed.starts_with("server:") {
             patched_lines.push(format!("{}server: https://127.0.0.1:26443", indent));
@@ -233,10 +229,6 @@ pub async fn enable() -> Result<()> {
 
     let mach_kubeconfig = kube_dir.join("config.mach");
     fs::write(&mach_kubeconfig, &patched_yaml)?;
-
-    // Also write config.norb for backward compatibility
-    let norb_kubeconfig = kube_dir.join("config.norb");
-    let _ = fs::write(&norb_kubeconfig, &patched_yaml);
 
     // Set or merge into ~/.kube/config safely, NEVER overwriting user's active context without permission
     let main_config = kube_dir.join("config");
@@ -263,9 +255,9 @@ pub async fn enable() -> Result<()> {
                 None
             });
 
-        // 3. Remove any stale 'mach' or 'norb' entries from main config before merging
+        // 3. Remove any stale 'mach' entries from main config before merging
         if let Some(main_str) = main_config.to_str() {
-            for old in &["mach", "norb"] {
+            for old in &["mach"] {
                 let _ = Command::new("kubectl")
                     .args(["--kubeconfig", main_str, "config", "delete-cluster", old])
                     .output();
@@ -297,9 +289,9 @@ pub async fn enable() -> Result<()> {
             .args(["config", "set-context", "mach", "--cluster=mach", "--user=mach"])
             .output();
 
-        // 5. If the user already had an active context set (and it wasn't mach or norb), restore it!
+        // 5. If the user already had an active context set (and it wasn't mach), restore it!
         if let Some(ctx) = prev_context {
-            if ctx != "mach" && ctx != "norb" {
+            if ctx != "mach" {
                 let _ = Command::new("kubectl")
                     .args(["config", "use-context", &ctx])
                     .output();
@@ -392,7 +384,6 @@ pub async fn status() -> Result<()> {
 
             let home = dirs::home_dir().unwrap_or_default();
             let conf = home.join(".kube").join("config.mach");
-            let conf = if conf.exists() { conf } else { home.join(".kube").join("config.norb") };
             if conf.exists() {
                 println!("  Kubeconfig:  {}", conf.display());
                 let _ = Command::new("kubectl")

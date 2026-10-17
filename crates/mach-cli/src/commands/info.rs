@@ -1,9 +1,9 @@
-//! `norb info` command implementation.
+//! `mach info` command implementation.
 
 use anyhow::{bail, Context, Result};
 use nix::sys::signal::kill;
 use nix::unistd::Pid;
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use mach_common::machine::MachineState;
 
 use super::{find_machine, load_all_machines};
@@ -34,7 +34,7 @@ fn get_proc_rss_mib(_pid: u32) -> Option<u64> {
 }
 
 pub async fn run(name: Option<&str>) -> Result<()> {
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
 
     let target_name = match name {
         Some(n) => n.to_string(),

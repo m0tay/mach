@@ -1,4 +1,4 @@
-//! Command implementations for `norb`.
+//! Command implementations for mach.
 
 pub mod boot;
 pub mod clone_cmd;
@@ -38,7 +38,7 @@ pub mod update;
 pub mod version;
 
 use anyhow::{bail, Context, Result};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use mach_common::machine::{Machine, MachineState};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -104,11 +104,11 @@ pub fn save_machine(machines_dir: &Path, machine: &Machine) -> Result<()> {
 /// 3. Single running user machine -> if exactly one user machine is currently running.
 /// 4. Single existing user machine -> if exactly one user machine exists overall.
 /// 5. Error -> if none or ambiguous.
-pub fn resolve_target_machine(cfg: &NorbConfig, name_opt: Option<&str>) -> Result<Machine> {
+pub fn resolve_target_machine(cfg: &MachConfig, name_opt: Option<&str>) -> Result<Machine> {
     resolve_target_machine_ext(cfg, name_opt, false)
 }
 
-pub fn resolve_target_machine_ext(cfg: &NorbConfig, name_opt: Option<&str>, allow_system: bool) -> Result<Machine> {
+pub fn resolve_target_machine_ext(cfg: &MachConfig, name_opt: Option<&str>, allow_system: bool) -> Result<Machine> {
     if let Some(name) = name_opt {
         let m = find_machine(&cfg.machines_dir, name)?
             .with_context(|| format!("machine '{name}' not found"))?;

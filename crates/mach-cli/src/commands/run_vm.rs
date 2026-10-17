@@ -1,4 +1,4 @@
-//! `norb run-vm` internal background VMM executor.
+//! `mach run-vm` internal background VMM executor.
 
 use anyhow::Result;
 use mach_vmm::run_vz_vm;
@@ -21,7 +21,7 @@ pub fn run(
     // Determine if the machine is configured for isolated sandbox mode.
     // If isolated == true, omit shared directory to prevent host directory access.
     let is_isolated = std::env::args().any(|arg| arg == "--isolated")
-        || mach_common::config::NorbConfig::load()
+        || mach_common::config::MachConfig::load()
             .ok()
             .and_then(|cfg| {
                 let meta_path = cfg.machines_dir.join(name).join("machine.json");

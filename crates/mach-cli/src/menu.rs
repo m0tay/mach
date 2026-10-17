@@ -1,6 +1,6 @@
-//! Minimal Apple Silicon macOS Menu Bar status item for Norb.
+//! Minimal Apple Silicon macOS Menu Bar status item for Mach.
 //!
-//! Provides a native status item in the macOS menu bar (` Norb`)
+//! Provides a native status item in the macOS menu bar (` mach`)
 //! displaying running machines, dynamic IP addresses, Docker socket status,
 //! Kubernetes cluster readiness, and quick actions (shell, file browsing, restart, quit).
 //! Pure native macOS Cocoa / AppKit with < 3 MB RAM footprint and zero Electron bloat.
@@ -10,7 +10,7 @@ use anyhow::Result;
 #[cfg(target_os = "macos")]
 mod imp {
     use anyhow::Result;
-    use mach_common::config::{MachConfig, NorbConfig};
+    use mach_common::config::MachConfig;
     use mach_common::machine::MachineState;
     use std::ffi::{c_char, c_void, CStr, CString};
     use std::sync::{Once, OnceLock};
@@ -261,17 +261,15 @@ mod imp {
             || m.config.name == "mach-docker"
             || m.config.name == "mach-kubernetes"
             || m.config.name == "mach-k8s"
-            || m.config.name == "norb-k8s"
     }
 
-    fn is_docker_socket_responding(cfg: Option<&NorbConfig>) -> bool {
+    fn is_docker_socket_responding(cfg: Option<&MachConfig>) -> bool {
         let mut candidates = Vec::new();
         if let Some(cfg) = cfg {
             candidates.push(cfg.data_dir.join("run").join("docker.sock"));
         }
         if let Some(home) = dirs::home_dir() {
             candidates.push(home.join(".mach").join("run").join("docker.sock"));
-            candidates.push(home.join(".norb").join("run").join("docker.sock"));
         }
         candidates.push(std::path::PathBuf::from("/var/run/docker.sock"));
 
@@ -310,7 +308,7 @@ mod imp {
 
     fn get_docker_status(
         all_machines: &[mach_common::machine::Machine],
-        cfg: Option<&NorbConfig>,
+        cfg: Option<&MachConfig>,
     ) -> &'static str {
         let docker_vm = all_machines.iter().find(|m| m.config.name == "mach-docker");
         match docker_vm {
@@ -334,7 +332,6 @@ mod imp {
         let k8s_vm = all_machines.iter().find(|m| {
             m.config.name == "mach-kubernetes"
                 || m.config.name == "mach-k8s"
-                || m.config.name == "norb-k8s"
         });
         match k8s_vm {
             None => "Kubernetes: Not installed",
@@ -358,7 +355,7 @@ mod imp {
         msg_send_void(menu, sel_registerName(b"removeAllItems\0".as_ptr() as _));
 
         // Discover machines
-        let cfg_res = NorbConfig::load();
+        let cfg_res = MachConfig::load();
         let all_machines = if let Ok(ref cfg) = cfg_res {
             crate::commands::load_all_machines(&cfg.machines_dir).unwrap_or_default()
         } else {
@@ -507,16 +504,10 @@ end tell"#,
         let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/Users"));
         let user_mach = home.join("Mach");
         let dot_mach = home.join(".mach");
-        let user_norb = home.join("Norb");
-        let dot_norb = home.join(".norb");
         let target = if user_mach.exists() {
             user_mach
-        } else if dot_mach.exists() {
-            dot_mach
-        } else if user_norb.exists() {
-            user_norb
         } else {
-            dot_norb
+            dot_mach
         };
         let _ = std::fs::create_dir_all(&target);
         let _ = std::process::Command::new("open").arg(&target).spawn();
@@ -525,7 +516,7 @@ end tell"#,
     extern "C" fn on_restart_all(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
         std::thread::spawn(|| {
             let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("mach"));
-            if let Ok(cfg) = NorbConfig::load() {
+            if let Ok(cfg) = MachConfig::load() {
                 if let Ok(machines) = crate::commands::load_all_machines(&cfg.machines_dir) {
                     let running: Vec<_> = machines
                         .into_iter()
@@ -629,7 +620,7 @@ end tell"#,
     }
 
     pub fn run_menu_bar() -> Result<()> {
-        println!("\x1b[1;36m➜\x1b[0m Starting Mach Menu Bar status item (\x1b[1m Mach\x1b[0m)...");
+        println!("\x1b[1;36m➜\x1b[0m Starting mach Menu Bar status item (\x1b[1m mach\x1b[0m)...");
 
         unsafe {
             let pool = objc_autoreleasePoolPush();
@@ -732,7 +723,7 @@ end tell"#,
                 msg_send_1(
                     status_item,
                     sel_registerName(b"setTitle:\0".as_ptr() as _),
-                    ns_string(" Mach"),
+                    ns_string(" mach"),
                 );
             }
 
@@ -807,7 +798,7 @@ end tell"#,
             );
 
             println!("\x1b[1;32m✓\x1b[0m Mach status item active in macOS menu bar.");
-            println!("  Click \x1b[1m Mach\x1b[0m in your top status bar to view running machines and controls.");
+            println!("  Click \x1b[1m mach\x1b[0m in your top status bar to view running machines and controls.");
 
             objc_autoreleasePoolPop(pool);
 

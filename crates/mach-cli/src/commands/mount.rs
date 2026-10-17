@@ -1,7 +1,7 @@
-//! Machine filesystem mount and Finder integration for Norb.
+//! Machine filesystem mount and Finder integration for mach.
 
 use anyhow::{bail, Result};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use mach_common::machine::MachineState;
 use std::path::Path;
 use std::process::Command;
@@ -10,11 +10,11 @@ use crate::commands::find_machine;
 use crate::nfs;
 
 /// Mount or open a machine's filesystem in macOS Finder.
-/// Establishes Unified Finder Hierarchy (`~/Norb/machines/` and `~/Norb/volumes/`),
-/// supports `~/Norb/<machine>` direct mounting, and utilizes native macOS NFS loopback
+/// Establishes Unified Finder Hierarchy (`~/Mach/machines/` and `~/Mach/volumes/`),
+/// supports `~/Mach/<machine>` direct mounting, and utilizes native macOS NFS loopback
 /// with fallback to sshfs and Finder SFTP.
 pub async fn run_mount(name: &str, target: Option<&Path>) -> Result<()> {
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
     let machine = match find_machine(&cfg.machines_dir, name)? {
         Some(m) => m,
         None => bail!("Machine '{}' does not exist.", name),

@@ -75,14 +75,13 @@ pub fn generate_cidata_iso(
 r#"#cloud-config
 bootcmd:
   - mkdir -p /etc/systemd/network
-  - printf '[Match]\nName=e*\n\n[Network]\nDHCP=ipv4\n\n[DHCPv4]\nClientIdentifier=mac\n' > /etc/systemd/network/99-norb-mac.network
+  - printf '[Match]\nName=e*\n\n[Network]\nDHCP=ipv4\n\n[DHCPv4]\nClientIdentifier=mac\n' > /etc/systemd/network/99-mach-mac.network
 chpasswd:
   list: |
     root:root
     debian:debian
     ubuntu:ubuntu
     fedora:fedora
-    norb:norb
   expire: False
 users:
   - name: root
@@ -104,12 +103,7 @@ users:
     ssh_authorized_keys:
 {keys}    shell: /bin/bash
   - name: mach
-    gecos: Mach User
-    sudo: ALL=(ALL) NOPASSWD:ALL
-    ssh_authorized_keys:
-{keys}    shell: /bin/bash
-  - name: norb
-    gecos: Norb User
+    gecos: mach user
     sudo: ALL=(ALL) NOPASSWD:ALL
     ssh_authorized_keys:
 {keys}    shell: /bin/bash
@@ -121,7 +115,7 @@ runcmd:
   - mkdir -p /etc/ssh/sshd_config.d && echo "PermitRootLogin yes" > /etc/ssh/sshd_config.d/mach.conf || true
   - systemctl restart ssh || systemctl restart sshd || true
   - mkdir -p /Users
-  - mount -t virtiofs mach_share /Users || mount -t virtiofs norb_share /Users || true
+  - mount -t virtiofs mach_share /Users || true
   - echo "mach_share /Users virtiofs defaults 0 0" >> /etc/fstab
   - mkdir -p /media/rosetta
   - mount -t virtiofs rosetta /media/rosetta || true

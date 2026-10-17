@@ -1,14 +1,14 @@
-//! `norb delete` / `norb rm` command implementation.
+//! `mach delete` / `mach rm` command implementation.
 
 use std::io::{self, IsTerminal, Write};
 use anyhow::{bail, Context, Result};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use std::fs;
 
 use super::find_machine;
 
 pub async fn run(name: &str, yes: bool, system: bool) -> Result<()> {
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
 
     let machine = find_machine(&cfg.machines_dir, name)?
         .with_context(|| format!("machine '{name}' not found"))?;
