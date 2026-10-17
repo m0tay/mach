@@ -29,7 +29,7 @@ fn terminate_docker_ssh_tunnel(ip_opt: Option<&str>) {
     }
 }
 
-fn stop_single_machine(
+pub fn stop_single_machine(
     machine: &mut mach_common::machine::Machine,
     cfg: &MachConfig,
     force: bool,
@@ -37,11 +37,13 @@ fn stop_single_machine(
     println!("\x1b[1;36m➜\x1b[0m Stopping machine \x1b[1m{}\x1b[0m...", machine.config.name);
 
     let pid_file = cfg.machines_dir.join(&machine.config.name).join("pid");
-    let target_pid = machine.pid.or_else(|| {
-        std::fs::read_to_string(&pid_file)
-            .ok()
-            .and_then(|s| s.trim().parse::<u32>().ok())
-    });
+    let target_pid = machine.pid
+        .or_else(|| {
+            std::fs::read_to_string(&pid_file)
+                .ok()
+                .and_then(|s| s.trim().parse::<u32>().ok())
+        })
+        .or_else(|| super::find_running_vm_pid(&machine.config.name));
 
     if let Some(ip) = machine.ip_address {
         terminate_docker_ssh_tunnel(Some(&ip.to_string()));
@@ -90,6 +92,9 @@ fn stop_single_machine(
         let _ = std::fs::remove_file(&pid_file);
     }
 
+    // Clean up any stray child process for this machine
+    super::kill_running_vm_processes(Some(&machine.config.name));
+
     machine.state = MachineState::Stopped;
     machine.ip_address = None;
     machine.pid = None;
@@ -109,12 +114,20 @@ pub async fn run(name: Option<&str>, force: bool, system: bool) -> Result<()> {
     let target_name = match name {
         Some(n) => n.to_string(),
         None => {
-            let running: Vec<_> = load_all_machines(&cfg.machines_dir)?
-                .into_iter()
-                .filter(|m| m.state == MachineState::Running && (system || !m.is_system()))
-                .collect();
+            let machines = load_all_machines(&cfg.machines_dir)?;
+            let mut running = Vec::new();
+            for m in machines {
+                let is_running_state = m.state == MachineState::Running;
+                let has_proc = super::find_running_vm_pid(&m.config.name).is_some();
+                if (is_running_state || has_proc) && (system || !m.is_system()) {
+                    running.push(m);
+                }
+            }
 
             if running.is_empty() {
+                if system {
+                    super::kill_running_vm_processes(None);
+                }
                 println!("No user machines currently running.");
                 return Ok(());
             }

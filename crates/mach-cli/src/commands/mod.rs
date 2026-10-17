@@ -194,3 +194,47 @@ pub fn resolve_target_machine_ext(cfg: &MachConfig, name_opt: Option<&str>, allo
 
     bail!("multiple machines found; please specify a machine name or set a default with `mach default <name>`");
 }
+
+/// Find any active hypervisor process running for a machine by scanning the macOS process table.
+pub fn find_running_vm_pid(machine_name: &str) -> Option<u32> {
+    if let Ok(output) = std::process::Command::new("ps").args(["-eo", "pid,command"]).output() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let is_mach_vm = line.contains("run-vm") && (line.contains("mach") || line.contains("machctl"));
+            if is_mach_vm && (line.contains(&format!("--name {}", machine_name)) || line.contains(&format!("--name={}", machine_name))) {
+                if let Some(pid_str) = line.split_whitespace().next() {
+                    if let Ok(pid) = pid_str.parse::<u32>() {
+                        return Some(pid);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Kill any running hypervisor processes for a machine (or all mach VMs if machine_name_opt is None).
+pub fn kill_running_vm_processes(machine_name_opt: Option<&str>) {
+    if let Ok(output) = std::process::Command::new("ps").args(["-eo", "pid,command"]).output() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let is_mach_vm = line.contains("run-vm") && (line.contains("mach") || line.contains("machctl"));
+            if is_mach_vm {
+                let matches_target = match machine_name_opt {
+                    Some(name) => line.contains(&format!("--name {}", name)) || line.contains(&format!("--name={}", name)),
+                    None => true,
+                };
+                if matches_target {
+                    if let Some(pid_str) = line.split_whitespace().next() {
+                        if let Ok(pid) = pid_str.parse::<i32>() {
+                            let _ = nix::sys::signal::kill(
+                                nix::unistd::Pid::from_raw(pid),
+                                nix::sys::signal::Signal::SIGKILL,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

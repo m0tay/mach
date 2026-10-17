@@ -24,7 +24,7 @@ pub fn resolve_k8s_machine_name(machines_dir: &std::path::Path) -> Result<String
 }
 
 /// Terminate any existing background SSH port-forward tunnel for Kubernetes API (26443).
-fn terminate_k8s_ssh_tunnel() {
+pub fn terminate_k8s_ssh_tunnel() {
     let mut killed = false;
     if let Ok(output) = Command::new("ps").args(["-eo", "pid,command"]).output() {
         let stdout = String::from_utf8_lossy(&output.stdout);

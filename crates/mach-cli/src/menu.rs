@@ -539,6 +539,26 @@ end tell"#,
     }
 
     extern "C" fn on_quit(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
+        // 1. Cleanly stop all machines (both user and system)
+        if let Ok(cfg) = MachConfig::load() {
+            if let Ok(machines) = crate::commands::load_all_machines(&cfg.machines_dir) {
+                for mut m in machines {
+                    let _ = crate::commands::stop::stop_single_machine(&mut m, &cfg, true);
+                }
+            }
+        }
+
+        // 2. Terminate any remaining VM hypervisor processes
+        crate::commands::kill_running_vm_processes(None);
+
+        // 3. Terminate background tunnels and clean up socket files
+        crate::commands::docker::terminate_docker_ssh_tunnel();
+        crate::commands::k8s::terminate_k8s_ssh_tunnel();
+        if let Ok(cfg) = MachConfig::load() {
+            let _ = std::fs::remove_file(cfg.data_dir.join("run").join("docker.sock"));
+        }
+
+        // 4. Terminate NSApplication
         unsafe {
             let app = msg_send_0(
                 objc_getClass(b"NSApplication\0".as_ptr() as _),
@@ -558,14 +578,20 @@ end tell"#,
 
     extern "C" fn check_running_state(_this: *mut c_void, _cmd: *mut c_void, _timer: *mut c_void) {
         let start = MENU_START_TIME.get_or_init(std::time::Instant::now);
-        // 2-second grace period on launch
-        if start.elapsed().as_millis() < 2000 {
+        // 3-second grace period on launch
+        if start.elapsed().as_millis() < 3000 {
             return;
         }
 
         if let Ok(cfg) = MachConfig::load() {
             let has_running = crate::commands::load_all_machines(&cfg.machines_dir)
-                .map(|ms| ms.iter().any(|m| m.state == MachineState::Running))
+                .map(|ms| {
+                    ms.iter().any(|m| {
+                        m.state == MachineState::Running
+                            || m.state == MachineState::Starting
+                            || crate::commands::find_running_vm_pid(&m.config.name).is_some()
+                    })
+                })
                 .unwrap_or(false);
 
             if !has_running {

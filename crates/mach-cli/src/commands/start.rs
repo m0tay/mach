@@ -239,15 +239,16 @@ pub async fn run_ext(name: Option<&str>, to_stderr: bool) -> Result<()> {
     fs::create_dir_all(&machine_dir)?;
 
     let pid_file = machine_dir.join("pid");
-    let check_pid = machine.pid.or_else(|| {
-        fs::read_to_string(&pid_file).ok().and_then(|s| s.trim().parse::<u32>().ok())
-    });
+    let check_pid = machine.pid
+        .or_else(|| fs::read_to_string(&pid_file).ok().and_then(|s| s.trim().parse::<u32>().ok()))
+        .or_else(|| super::find_running_vm_pid(&machine.config.name));
 
     if let Some(pid) = check_pid {
         let raw_pid = nix::unistd::Pid::from_raw(pid as i32);
         if nix::sys::signal::kill(raw_pid, None).is_ok() {
             if let Some(ip) = machine.ip_address {
-                if tokio::net::TcpStream::connect((ip, 22)).await.is_ok() {
+                let connect_fut = tokio::net::TcpStream::connect((ip, 22));
+                if tokio::time::timeout(Duration::from_millis(1500), connect_fut).await.map(|r| r.is_ok()).unwrap_or(false) {
                     machine.state = MachineState::Running;
                     machine.pid = Some(pid);
                     let _ = save_machine(&cfg.machines_dir, &machine);
@@ -259,10 +260,14 @@ pub async fn run_ext(name: Option<&str>, to_stderr: bool) -> Result<()> {
             }
             // Stale or stuck orphan process holding disk/EFI lock, kill it cleanly
             let _ = nix::sys::signal::kill(raw_pid, nix::sys::signal::Signal::SIGKILL);
-            sleep(Duration::from_millis(200)).await;
+            sleep(Duration::from_millis(250)).await;
         }
         let _ = fs::remove_file(&pid_file);
     }
+
+    // Ensure no lingering duplicate hypervisor process holds the disk lock for this machine
+    super::kill_running_vm_processes(Some(&machine.config.name));
+    sleep(Duration::from_millis(150)).await;
 
     let (mac_str, lease_pattern) = generate_mac(&machine.id);
 
