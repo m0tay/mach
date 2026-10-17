@@ -9,7 +9,11 @@ class Norb < Formula
   depends_on :macos
   depends_on arch: :arm64
 
+  env :userpaths
+
   def install
+    ENV.prepend_path "PATH", "#{Dir.home}/.cargo/bin"
+    ENV.prepend_path "PATH", "/opt/homebrew/bin"
     system "cargo", "build", "--release", "--bin", "norb"
     bin.install "target/release/norb"
     bin.install_symlink "norb" => "norbctl"
