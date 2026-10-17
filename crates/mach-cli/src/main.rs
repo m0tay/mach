@@ -129,7 +129,6 @@ async fn main() -> Result<()> {
 
         // Smart 'mach' zero-args behavior:
         let cfg = NorbConfig::load()?;
-        commands::menu_cmd::ensure_menu_bar_running();
 
         let machines = commands::load_all_machines(&cfg.machines_dir)?;
         let user_machines: Vec<_> = machines.iter().filter(|m| !m.is_system()).collect();
@@ -158,6 +157,8 @@ async fn main() -> Result<()> {
         let machine = commands::find_machine(&cfg.machines_dir, &target_name)?.unwrap();
         if machine.state != MachineState::Running {
             commands::start::run(Some(&target_name)).await?;
+        } else {
+            commands::menu_cmd::ensure_menu_bar_running();
         }
 
         return commands::shell::run(Some(&target_name), false, &[]).await;

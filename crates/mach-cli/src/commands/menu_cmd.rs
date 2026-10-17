@@ -1,8 +1,12 @@
-//! Menu command dispatcher for Norb.
+//! Menu command dispatcher for Mach.
 //!
-//! Launches the native Apple Silicon macOS menu bar status item (` Norb`).
+//! Launches the native Apple Silicon macOS menu bar status item.
+//! Zero-bloat lifecycle: Automatically launches when any machine is running,
+//! and automatically disappears when all machines are stopped.
 
 use anyhow::Result;
+use mach_common::config::MachConfig;
+use mach_common::machine::MachineState;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -20,9 +24,33 @@ pub fn is_menu_running(run_dir: &Path) -> Option<u32> {
     None
 }
 
+/// Terminate any running macOS menu bar status item process.
+pub fn stop_menu_bar() {
+    if let Ok(cfg) = MachConfig::load() {
+        let run_dir = cfg.data_dir.join("run");
+        if let Some(pid) = is_menu_running(&run_dir) {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(pid as i32),
+                nix::sys::signal::Signal::SIGTERM,
+            );
+            let _ = fs::remove_file(run_dir.join("menu.pid"));
+        }
+    }
+}
+
+/// Check if any machines are currently in Running state.
+pub fn has_running_machines() -> bool {
+    if let Ok(cfg) = MachConfig::load() {
+        if let Ok(machines) = crate::commands::load_all_machines(&cfg.machines_dir) {
+            return machines.iter().any(|m| m.state == MachineState::Running);
+        }
+    }
+    false
+}
+
 /// Automatically start the macOS menu bar status item in the background if not already active.
 pub fn ensure_menu_bar_running() {
-    if let Ok(cfg) = mach_common::config::NorbConfig::load() {
+    if let Ok(cfg) = MachConfig::load() {
         let run_dir = cfg.data_dir.join("run");
         if is_menu_running(&run_dir).is_none() {
             let log_dir = cfg.data_dir.join("logs");
@@ -54,13 +82,20 @@ pub fn ensure_menu_bar_running() {
 
 /// Execute the macOS menu bar status item application.
 pub async fn run() -> Result<()> {
-    if let Ok(cfg) = mach_common::config::NorbConfig::load() {
+    // If everything is stopped and user runs `mach menu` directly, inform them:
+    if !has_running_machines() {
+        println!("No machines are currently running. Mach's menu bar status item launches");
+        println!("automatically when any machine or service starts, and hides when stopped.");
+        return Ok(());
+    }
+
+    if let Ok(cfg) = MachConfig::load() {
         let run_dir = cfg.data_dir.join("run");
         let _ = fs::create_dir_all(&run_dir);
         let _ = fs::write(run_dir.join("menu.pid"), std::process::id().to_string());
     }
     let res = crate::menu::run_menu_bar();
-    if let Ok(cfg) = mach_common::config::NorbConfig::load() {
+    if let Ok(cfg) = MachConfig::load() {
         let _ = fs::remove_file(cfg.data_dir.join("run").join("menu.pid"));
     }
     res

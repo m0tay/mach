@@ -10,10 +10,10 @@ use anyhow::Result;
 #[cfg(target_os = "macos")]
 mod imp {
     use anyhow::Result;
-    use mach_common::config::NorbConfig;
+    use mach_common::config::{MachConfig, NorbConfig};
     use mach_common::machine::MachineState;
     use std::ffi::{c_char, c_void, CStr, CString};
-    use std::sync::Once;
+    use std::sync::{Once, OnceLock};
 
     #[link(name = "AppKit", kind = "framework")]
     #[link(name = "Foundation", kind = "framework")]
@@ -184,6 +184,12 @@ mod imp {
                         cls,
                         sel_registerName(b"onQuit:\0".as_ptr() as _),
                         on_quit as *const c_void,
+                        types,
+                    );
+                    class_addMethod(
+                        cls,
+                        sel_registerName(b"checkRunningState:\0".as_ptr() as _),
+                        check_running_state as *const c_void,
                         types,
                     );
                     objc_registerClassPair(cls);
@@ -557,6 +563,38 @@ end tell"#,
         }
     }
 
+    static MENU_START_TIME: OnceLock<std::time::Instant> = OnceLock::new();
+
+    extern "C" fn check_running_state(_this: *mut c_void, _cmd: *mut c_void, _timer: *mut c_void) {
+        let start = MENU_START_TIME.get_or_init(std::time::Instant::now);
+        // 2-second grace period on launch
+        if start.elapsed().as_millis() < 2000 {
+            return;
+        }
+
+        if let Ok(cfg) = MachConfig::load() {
+            let has_running = crate::commands::load_all_machines(&cfg.machines_dir)
+                .map(|ms| ms.iter().any(|m| m.state == MachineState::Running))
+                .unwrap_or(false);
+
+            if !has_running {
+                unsafe {
+                    let app = msg_send_0(
+                        objc_getClass(b"NSApplication\0".as_ptr() as _),
+                        sel_registerName(b"sharedApplication\0".as_ptr() as _),
+                    );
+                    if !app.is_null() {
+                        msg_send_1(
+                            app,
+                            sel_registerName(b"terminate:\0".as_ptr() as _),
+                            std::ptr::null_mut(),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     fn find_menu_icon_path() -> Option<std::path::PathBuf> {
         // 1. Current working directory or dev repo
         for name in &["assets/mach_menu_icon@2x.png", "assets/mach_menu_icon.png"] {
@@ -734,6 +772,32 @@ end tell"#,
 
             // Initial populate
             populate_menu(menu, delegate);
+
+            // Schedule periodic auto-terminate check (exits if all machines are stopped)
+            let timer_cls = objc_getClass(b"NSTimer\0".as_ptr() as _);
+            if !timer_cls.is_null() {
+                let sel_timer = sel_registerName(
+                    b"scheduledTimerWithTimeInterval:target:selector:userInfo:repeats:\0".as_ptr() as _,
+                );
+                let f_timer: unsafe extern "C" fn(
+                    *mut c_void,
+                    *mut c_void,
+                    f64,
+                    *mut c_void,
+                    *mut c_void,
+                    *mut c_void,
+                    i8,
+                ) -> *mut c_void = std::mem::transmute(objc_msgSend as *const ());
+                f_timer(
+                    timer_cls,
+                    sel_timer,
+                    1.5, // Check every 1.5s
+                    delegate,
+                    sel_registerName(b"checkRunningState:\0".as_ptr() as _),
+                    std::ptr::null_mut(),
+                    1, // repeats: YES
+                );
+            }
 
             // Attach menu to status item
             msg_send_1(
