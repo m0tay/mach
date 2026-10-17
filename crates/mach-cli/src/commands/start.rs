@@ -385,6 +385,19 @@ pub async fn run_ext(name: Option<&str>, to_stderr: bool) -> Result<()> {
     out_ln!("  Domain:      \x1b[1;34m{}.mach.local\x1b[0m", machine.config.name);
     out_ln!("  SSH Command: \x1b[1;32mssh root@{}\x1b[0m", ip);
 
+    // Mount VirtioFS 1:1 host directory sharing (/Users) if not isolated
+    if !machine.config.isolated {
+        let mut mount_users_args = base_ssh.clone();
+        mount_users_args.extend([
+            "-o".to_string(), "ConnectTimeout=5".to_string(),
+            format!("root@{ip}"),
+            "mkdir -p /Users && (mountpoint -q /Users || mount -t virtiofs mach_share /Users 2>/dev/null || true)".to_string(),
+        ]);
+        let _ = std::process::Command::new("ssh")
+            .args(&mount_users_args)
+            .output();
+    }
+
     // Mount and register Apple Rosetta 2 for Linux if available
     let mut rosetta_args = base_ssh.clone();
     rosetta_args.extend([
