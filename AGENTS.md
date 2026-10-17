@@ -45,7 +45,7 @@ While the internals are modern, native, and open-source, the external user exper
    - `mach uname -a` $\rightarrow$ Transparent command execution in Linux.
    - `mach -m <machine> -u root <cmd>` $\rightarrow$ Machine and user flags.
 2. **Management Plane (`machctl`)**:
-   - Complete subcommands matching `orbctl`: `create`, `list`, `start`, `stop`, `delete`, `clone`, `rename`, `info`, `top`, `debug`, `export`, `import`, `push`, `pull`, `doctor`, `k8s`.
+   - Complete subcommands matching `orbctl`: `create`, `list`, `start`, `stop`, `delete`, `clone`, `rename`, `info`, `inspect`, `dump`, `top`, `debug`, `export`, `import`, `push`, `pull`, `doctor`, `k8s`, `docker`, `config`, `daemon`, `dns`, `tls`.
 3. **Standard Docker Context**:
    - `docker --context mach ps` / `docker context use mach` pointing to `~/.mach/run/docker.sock`.
    - Optional legacy symlink at `/var/run/docker.sock` for VS Code Dev Containers and Testcontainers via `machctl docker setup --system`.
@@ -128,6 +128,19 @@ Do **NOT** assume code works just because `cargo check` passes.
   ```
 - Ensure test machines (`real-alp`, `real-deb`, `test-deb`, etc.) are deleted after test suites complete.
 
+### Rule 5: Strict Separation of `mach` vs `machctl` (Commands in ONE Place Only — NEVER Duplicate!)
+Commands must live in **ONE place and one place only**. Never duplicate commands across both `mach` and `machctl`.
+- **`mach` is the daily driver CLI**:
+  - Drops into the interactive Linux shell when run with 0 arguments (`mach`).
+  - Transparently executes commands inside Linux (`mach uname -a`, `mach apt update`, `mach docker ps`, `mach -m debian -u root whoami`).
+  - Intercepts ONLY basic daily machine lifecycle verbs: `start`, `stop`, `restart`, `shell`, `create`, `delete`, `list` / `ls`, `menu`.
+  - **NEVER add administration, inspection, configuration, or management subcommands to `mach`!**
+- **`machctl` is the single administration & control plane CLI** (mirroring `orbctl`):
+  - All control plane, system diagnostics, inspection, and administration tools live exclusively here:
+    `inspect`, `dump`, `info`, `top`, `doctor`, `config`, `daemon`, `dns`, `tls`, `k8s`, `docker`, `mount`, `code`, `link`, `debug`, `export`, `import`, `clone`, `rename`.
+- **If a control plane command is invoked via `mach`** (e.g. `mach inspect` or `mach dump`):
+  - `mach` must NOT execute it. It must print a clear, polite error redirecting the user to `machctl <command>`.
+
 ---
 
 ## 5. Key Technical Invariants & Gotchas
@@ -181,6 +194,8 @@ Do **NOT** assume code works just because `cargo check` passes.
 | **Transparent Command Execution** | `mach uname -a` or `mach run <name> uname -a` |
 | **Docker Context Setup** | `mach docker setup` |
 | **Health Check** | `machctl doctor` |
+| **Inspect Machine Specs (YAML/JSON)** | `machctl inspect <name>` / `machctl inspect <name> --json` |
+| **Dump Raw Machine Config (YAML/JSON)** | `machctl dump <name>` / `machctl dump <name> --json` |
 
 ---
 
