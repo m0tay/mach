@@ -218,6 +218,23 @@ impl Vmm {
         self.console_in_tx.clone()
     }
 
+    /// Compact guest memory by writing `echo 3 > /proc/sys/vm/drop_caches` to the guest console.
+    ///
+    /// This instructs the Linux kernel inside the guest to immediately reclaim clean
+    /// pagecache, dentries, and inode slab caches, reducing guest physical footprint.
+    pub fn compact_guest_memory(&self) -> Result<()> {
+        if let Some(ref tx) = self.console_in_tx {
+            compact_guest_memory_via_console(tx)
+        } else {
+            bail!("guest console input channel is not available for memory compaction");
+        }
+    }
+
+    /// Alias for `compact_guest_memory`.
+    pub fn compact_memory(&self) -> Result<()> {
+        self.compact_guest_memory()
+    }
+
     /// Request VM shutdown.
     pub fn shutdown(&self) {
         self.shutdown.store(true, Ordering::SeqCst);
@@ -310,5 +327,102 @@ impl Vmm {
         }
 
         Ok(())
+    }
+}
+
+/// Linux kernel sysctl command to drop clean pagecache, dentries, and inodes.
+pub const DROP_CACHES_CMD: &str = "echo 3 > /proc/sys/vm/drop_caches";
+
+/// Shell script string that synchronizes dirty pages to disk first and then drops caches.
+pub const COMPACT_MEMORY_CMD: &str = "sync && echo 3 > /proc/sys/vm/drop_caches";
+
+/// Returns the shell command string to trigger pagecache, dentries, and inodes compaction in the guest kernel.
+pub fn guest_memory_compaction_command() -> &'static str {
+    COMPACT_MEMORY_CMD
+}
+
+/// Compact memory in a guest VM by writing `echo 3 > /proc/sys/vm/drop_caches` to its console channel.
+pub fn compact_guest_memory_via_console(tx: &UnboundedSender<Vec<u8>>) -> Result<()> {
+    let cmd = format!("{COMPACT_MEMORY_CMD}\n");
+    tx.send(cmd.into_bytes())
+        .context("failed to write drop_caches command to guest console channel")?;
+    debug!("sent drop_caches command to guest console channel");
+    Ok(())
+}
+
+/// Compact memory in a running guest VM over SSH targeting `root@ip`.
+///
+/// Runs `sync && echo 3 > /proc/sys/vm/drop_caches` to free clean pagecache,
+/// dentries, and inode caches inside the guest kernel.
+pub fn compact_guest_memory_over_ssh(
+    ip: &std::net::IpAddr,
+    ssh_args: &[String],
+) -> Result<std::process::Output> {
+    info!(ip = %ip, "compacting guest memory via SSH drop_caches");
+    let mut cmd = std::process::Command::new("ssh");
+    cmd.args(ssh_args);
+    cmd.args([
+        "-o",
+        "ConnectTimeout=2",
+        "-o",
+        "BatchMode=yes",
+        &format!("root@{ip}"),
+        COMPACT_MEMORY_CMD,
+    ]);
+    let output = cmd
+        .output()
+        .context("failed to execute SSH drop_caches command on guest")?;
+    if !output.status.success() {
+        bail!(
+            "guest memory compaction command failed on {ip} (exit code {:?}): {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    info!(ip = %ip, "guest memory compacted successfully");
+    Ok(output)
+}
+
+/// Compact memory in a guest VM via a raw file descriptor (e.g. console pipe or PTY).
+pub fn compact_guest_memory_via_fd(fd: std::os::unix::io::RawFd) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::io::FromRawFd;
+
+    let dup_fd = unsafe { libc::dup(fd) };
+    if dup_fd < 0 {
+        bail!(
+            "failed to duplicate file descriptor: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    let mut file = unsafe { std::fs::File::from_raw_fd(dup_fd) };
+    file.write_all(format!("{COMPACT_MEMORY_CMD}\n").as_bytes())
+        .context("failed to write drop_caches command to guest fd")?;
+    file.flush()
+        .context("failed to flush drop_caches command to guest fd")?;
+    debug!("wrote drop_caches command to guest fd {fd}");
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_guest_memory_compaction_command() {
+        assert_eq!(
+            guest_memory_compaction_command(),
+            "sync && echo 3 > /proc/sys/vm/drop_caches"
+        );
+        assert_eq!(DROP_CACHES_CMD, "echo 3 > /proc/sys/vm/drop_caches");
+    }
+
+    #[tokio::test]
+    async fn test_compact_guest_memory_via_console() {
+        let (tx, mut rx) = unbounded_channel::<Vec<u8>>();
+        compact_guest_memory_via_console(&tx).unwrap();
+        let received = rx.recv().await.expect("expected bytes in channel");
+        let s = String::from_utf8(received).unwrap();
+        assert!(s.contains("echo 3 > /proc/sys/vm/drop_caches"));
     }
 }
