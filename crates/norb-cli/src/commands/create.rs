@@ -17,6 +17,19 @@ pub async fn run(
     disk: u64,
     arch_str: &str,
 ) -> Result<()> {
+    let isolated = std::env::args().any(|arg| arg == "--isolated");
+    run_with_isolated(distro, name, cpus, memory, disk, arch_str, isolated).await
+}
+
+pub async fn run_with_isolated(
+    distro: &str,
+    name: Option<&str>,
+    cpus: u32,
+    memory: u64,
+    disk: u64,
+    arch_str: &str,
+    isolated: bool,
+) -> Result<()> {
     let mut cfg = NorbConfig::load()?;
 
     let mut existing_names = HashSet::new();
@@ -82,6 +95,9 @@ pub async fn run(
     println!("  CPUs:         \x1b[33m{}\x1b[0m", cpus);
     println!("  Memory:       \x1b[33m{} MiB\x1b[0m", memory);
     println!("  Disk:         \x1b[33m{} GiB\x1b[0m", disk);
+    if isolated {
+        println!("  Isolated:     \x1b[33mtrue (host file sharing disabled)\x1b[0m");
+    }
 
     let machine_cfg = MachineConfig {
         name: machine_name.clone(),
@@ -90,6 +106,7 @@ pub async fn run(
         cpus,
         memory_mb: memory,
         disk_gb: disk,
+        isolated,
     };
 
     let mut machine = Machine::new(machine_cfg);
