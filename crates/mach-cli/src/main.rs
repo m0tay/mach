@@ -182,7 +182,7 @@ async fn main() -> Result<()> {
         // everything else (info, top, logs, ps, uname, apt...) transparently runs in Linux!
         let mach_machine_commands = [
             "start", "stop", "restart", "shell", "create", "delete", "list", "ls",
-            "menu", "run", "setup", "completion", "boot", "run-vm", "help", "--help", "-h", "--version", "-V", "version",
+            "menu", "run", "setup", "completion", "boot", "run-vm", "help", "--help", "-h", "--version", "-V", "version", "update",
             "clone", "default", "export", "import", "rename", "info", "status", "top", "logs",
             "ssh", "push", "pull", "docker", "daemon", "dns", "doctor", "config", "debug",
             "mount", "code", "k8s", "link", "tls",
@@ -204,7 +204,7 @@ async fn main() -> Result<()> {
             "clone", "create", "list", "ls", "start", "stop", "restart", "delete",
             "default", "export", "import", "rename", "shell", "run", "info",
             "status", "top", "logs", "ssh", "push", "pull", "docker", "daemon",
-            "dns", "doctor", "config", "version", "boot", "run-vm", "debug",
+            "dns", "doctor", "config", "version", "update", "boot", "run-vm", "debug",
             "mount", "code", "k8s", "link", "tls", "completion", "menu", "setup", "help",
             "--help", "-h", "--version", "-V",
         ];
@@ -433,6 +433,9 @@ async fn main() -> Result<()> {
         }
         Commands::Version => {
             commands::version::run().await?;
+        }
+        Commands::Update => {
+            commands::update::run().await?;
         }
         Commands::RunVm {
             name,

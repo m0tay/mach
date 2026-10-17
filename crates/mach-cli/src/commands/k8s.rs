@@ -10,12 +10,16 @@ use std::time::{Duration, Instant};
 
 use crate::commands::find_machine;
 
-pub const K8S_VM_NAME: &str = "mach-k8s";
+pub const K8S_VM_NAME: &str = "mach-kubernetes";
+pub const ALT_K8S_VM_NAME: &str = "mach-k8s";
 pub const LEGACY_K8S_VM_NAME: &str = "norb-k8s";
 
 pub fn resolve_k8s_machine_name(machines_dir: &std::path::Path) -> Result<String> {
     if find_machine(machines_dir, K8S_VM_NAME)?.is_some() {
         return Ok(K8S_VM_NAME.to_string());
+    }
+    if find_machine(machines_dir, ALT_K8S_VM_NAME)?.is_some() {
+        return Ok(ALT_K8S_VM_NAME.to_string());
     }
     if find_machine(machines_dir, LEGACY_K8S_VM_NAME)?.is_some() {
         return Ok(LEGACY_K8S_VM_NAME.to_string());
@@ -71,7 +75,7 @@ async fn wait_for_ssh_ready(ip: &std::net::IpAddr) -> Result<()> {
         if port_open {
             // 2. Test SSH echo
             let mut cmd = Command::new("ssh");
-            cmd.args(crate::ssh::norb_ssh_args());
+            cmd.args(crate::ssh::mach_ssh_args());
             cmd.args([
                 "-o", "ConnectTimeout=2",
                 &format!("root@{ip}"),
@@ -204,6 +208,8 @@ pub async fn enable() -> Result<()> {
 
         if trimmed == "name: default" || trimmed == "name: norb" {
             patched_lines.push(format!("{}name: mach", indent));
+        } else if trimmed == "- name: default" || trimmed == "- name: norb" {
+            patched_lines.push(format!("{}- name: mach", indent));
         } else if trimmed == "cluster: default" || trimmed == "cluster: norb" {
             patched_lines.push(format!("{}cluster: mach", indent));
         } else if trimmed == "user: default" || trimmed == "user: norb" {

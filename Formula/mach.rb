@@ -3,7 +3,7 @@ class Mach < Formula
   homepage "https://github.com/douglaslobo/mach"
   url "file:///Users/douglaslobo/Developer/norb/dist/mach-0.1.0-aarch64-apple-darwin.tar.gz"
   version "0.1.0"
-  sha256 "4d5114322fdae07ff23149f050050bf53a7d1fd36073deb91c1157b2a4707378"
+  sha256 "fcaad386c78d6a102e898d677b6c18b9966f5ba82716ae0a408794426e196b71"
   license "MIT"
 
   depends_on :macos

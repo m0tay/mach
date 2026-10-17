@@ -358,6 +358,9 @@ pub enum Commands {
     /// Display version and build information
     Version,
 
+    /// Check for and apply Mach updates (Homebrew or binary)
+    Update,
+
     /// Internal command to execute the virtual machine process in the background
     #[command(hide = true)]
     RunVm {

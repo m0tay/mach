@@ -249,7 +249,7 @@ mod imp {
     }
 
     fn is_k8s_ready(running_machines: &[mach_common::machine::Machine]) -> bool {
-        let k8s_vm_running = running_machines.iter().any(|m| m.config.name == "mach-k8s" || m.config.name == "norb-k8s");
+        let k8s_vm_running = running_machines.iter().any(|m| m.config.name == "mach-kubernetes" || m.config.name == "mach-k8s" || m.config.name == "norb-k8s");
         if k8s_vm_running {
             if let Some(home) = dirs::home_dir() {
                 let kubeconfig_mach = home.join(".kube").join("config.mach");
@@ -269,7 +269,7 @@ mod imp {
 
         // Discover machines
         let cfg_res = NorbConfig::load();
-        let running_machines = if let Ok(ref cfg) = cfg_res {
+        let all_running = if let Ok(ref cfg) = cfg_res {
             if let Ok(machines) = crate::commands::load_all_machines(&cfg.machines_dir) {
                 machines
                     .into_iter()
@@ -282,7 +282,9 @@ mod imp {
             Vec::new()
         };
 
-        let running_count = running_machines.len();
+        let user_machines: Vec<_> = all_running.iter().filter(|m| !m.is_system()).collect();
+
+        let running_count = user_machines.len();
         let vm_label = if running_count == 1 { "VM" } else { "VMs" };
         let status_header = format!("Mach: Running ({} {})", running_count, vm_label);
         add_menu_item(menu, &status_header, None, None, false);
@@ -290,11 +292,11 @@ mod imp {
         // Separator
         add_separator(menu);
 
-        // Running Machines list (with IP)
-        if running_machines.is_empty() {
-            add_menu_item(menu, "  No running machines", None, None, false);
+        // Running User Machines list (with IP)
+        if user_machines.is_empty() {
+            add_menu_item(menu, "  No running user machines", None, None, false);
         } else {
-            for m in &running_machines {
+            for m in &user_machines {
                 let ip_str = m
                     .ip_address
                     .map(|ip| ip.to_string())
@@ -315,16 +317,16 @@ mod imp {
         // Docker Socket status
         let docker_active = is_docker_active(cfg_res.as_ref().ok());
         let docker_text = if docker_active {
-            "Docker Socket: Active"
+            "Docker Engine: Active (mach-docker)"
         } else {
-            "Docker Socket: Inactive"
+            "Docker Engine: Inactive"
         };
         add_menu_item(menu, docker_text, None, None, false);
 
         // Kubernetes status
-        let k8s_ready = is_k8s_ready(&running_machines);
+        let k8s_ready = is_k8s_ready(&all_running);
         let k8s_text = if k8s_ready {
-            "Kubernetes: Ready"
+            "Kubernetes: Ready (mach-kubernetes)"
         } else {
             "Kubernetes: Stopped"
         };
