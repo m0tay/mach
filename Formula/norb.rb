@@ -1,22 +1,20 @@
 class Norb < Formula
   desc "Lightweight, zero-overhead macOS virtualization and container engine in Rust"
   homepage "https://github.com/douglaslobo/norb"
-  url "file:///Users/douglaslobo/Developer/norb", using: :git, branch: "main"
+  url "file:///Users/douglaslobo/Developer/norb/dist/norb-0.1.0-aarch64-apple-darwin.tar.gz"
   version "0.1.0"
+  sha256 "5a997d7b1b810581b8e56499119bec0e5eded04da70174e2ea42dc92a8a956ef"
   license "MIT"
-  head "https://github.com/douglaslobo/norb.git", branch: "main"
 
   depends_on :macos
   depends_on arch: :arm64
 
-  env :userpaths
-
   def install
-    ENV.prepend_path "PATH", "#{Dir.home}/.cargo/bin"
-    ENV.prepend_path "PATH", "/opt/homebrew/bin"
-    system "cargo", "build", "--release", "--bin", "norb"
-    bin.install "target/release/norb"
+    bin.install "norb"
     bin.install_symlink "norb" => "norbctl"
+
+    # Install assets
+    (pkgshare/"assets").install Dir["assets/*"]
 
     # Codesign with hypervisor and virtualization entitlements
     system "codesign", "--force", "--entitlements", "entitlements.plist", "--sign", "-", bin/"norb"
@@ -31,7 +29,7 @@ class Norb < Formula
     <<~EOS
       🎉 Norb is installed and ready on your Apple Silicon Mac!
 
-      To initialize your environment (Debian Linux, Kubernetes, and Docker):
+      To start and initialize your environment:
         norb
 
       Quickstart:
