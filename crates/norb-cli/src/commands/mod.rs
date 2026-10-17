@@ -30,8 +30,9 @@ pub mod stop;
 pub mod top;
 pub mod version;
 
-use anyhow::{Context, Result};
-use norb_common::machine::Machine;
+use anyhow::{bail, Context, Result};
+use norb_common::config::NorbConfig;
+use norb_common::machine::{Machine, MachineState};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -88,4 +89,47 @@ pub fn save_machine(machines_dir: &Path, machine: &Machine) -> Result<()> {
     let content = serde_json::to_string_pretty(machine)?;
     fs::write(path, content)?;
     Ok(())
+}
+
+/// Resolve the target machine using standard fallback priority:
+/// 1. Explicit name (`name_opt`) -> if specified, must exist or error.
+/// 2. `cfg.default_machine` -> if configured and exists on disk.
+/// 3. Single running machine -> if exactly one machine is currently running.
+/// 4. Single existing machine -> if exactly one machine exists overall.
+/// 5. Error -> if none or ambiguous.
+pub fn resolve_target_machine(cfg: &NorbConfig, name_opt: Option<&str>) -> Result<Machine> {
+    if let Some(name) = name_opt {
+        return find_machine(&cfg.machines_dir, name)?
+            .with_context(|| format!("machine '{name}' not found"));
+    }
+
+    if let Some(ref def) = cfg.default_machine {
+        if let Some(m) = find_machine(&cfg.machines_dir, def)? {
+            return Ok(m);
+        }
+    }
+
+    let machines = load_all_machines(&cfg.machines_dir)?;
+    if machines.is_empty() {
+        bail!("no machines found. Run `norb create <distro>` first.");
+    }
+
+    let running: Vec<_> = machines
+        .iter()
+        .filter(|m| m.state == MachineState::Running)
+        .collect();
+
+    if running.len() == 1 {
+        return Ok(running[0].clone());
+    }
+
+    if machines.len() == 1 {
+        return Ok(machines[0].clone());
+    }
+
+    if running.len() > 1 {
+        bail!("multiple running machines found; please specify a machine name or set a default with `norb default <name>`");
+    }
+
+    bail!("multiple machines found; please specify a machine name or set a default with `norb default <name>`");
 }

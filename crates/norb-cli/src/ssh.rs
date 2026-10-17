@@ -2,6 +2,7 @@
 
 use anyhow::{bail, Context, Result};
 use std::fs;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -49,4 +50,14 @@ pub fn norb_ssh_args() -> Vec<String> {
         args.push(key.to_string_lossy().to_string());
     }
     args
+}
+
+/// Create a pre-configured SSH Command targeting `user@ip`.
+/// Configures `-o StrictHostKeyChecking=no`, `-o UserKnownHostsFile=/dev/null`, `-o LogLevel=ERROR`,
+/// includes Norb dedicated SSH key, and targets `user@ip`.
+pub fn new_ssh_command(ip: &IpAddr, user: &str) -> Command {
+    let mut cmd = Command::new("ssh");
+    cmd.args(norb_ssh_args());
+    cmd.arg(format!("{user}@{ip}"));
+    cmd
 }

@@ -60,61 +60,114 @@ pub fn ensure_cached_image(cache_dir: &Path, distro: &DistroImage) -> Result<Pat
 
     match distro.format {
         ImageFormat::TarXz { member } => {
-            let status = Command::new("sh")
-                .arg("-c")
-                .arg(format!(
-                    "curl -fSL --progress-bar \"{}\" | tar -xJf - -O \"{}\" > \"{}\"",
-                    distro.url,
-                    member,
-                    target_file.display()
-                ))
-                .status()
-                .with_context(|| "failed to download and extract tar.xz disk image")?;
+            let out_file = fs::File::create(&target_file)
+                .with_context(|| format!("failed to create image file at {}", target_file.display()))?;
 
-            if !status.success() {
+            let mut curl_proc = Command::new("curl")
+                .args(["-fSL", "--progress-bar", distro.url])
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .with_context(|| "failed to spawn curl")?;
+
+            let curl_out = curl_proc.stdout.take().context("failed to pipe curl stdout")?;
+
+            let tar_status = Command::new("tar")
+                .args(["-xJf", "-", "-O", member])
+                .stdin(curl_out)
+                .stdout(out_file)
+                .status()
+                .with_context(|| "failed to execute tar -xJf")?;
+
+            let curl_status = curl_proc.wait().with_context(|| "failed to wait on curl")?;
+
+            if !curl_status.success() || !tar_status.success() {
                 let _ = fs::remove_file(&target_file);
-                bail!("failed to download/extract image from {}", distro.url);
+                bail!(
+                    "failed to download/extract image from {} (curl: {:?}, tar: {:?})",
+                    distro.url,
+                    curl_status.code(),
+                    tar_status.code()
+                );
             }
         }
         ImageFormat::TarGz { member } => {
-            let status = Command::new("sh")
-                .arg("-c")
-                .arg(format!(
-                    "curl -fSL --progress-bar \"{}\" | tar -xzf - -O \"{}\" > \"{}\"",
-                    distro.url,
-                    member,
-                    target_file.display()
-                ))
-                .status()
-                .with_context(|| "failed to download and extract tar.gz disk image")?;
+            let out_file = fs::File::create(&target_file)
+                .with_context(|| format!("failed to create image file at {}", target_file.display()))?;
 
-            if !status.success() {
+            let mut curl_proc = Command::new("curl")
+                .args(["-fSL", "--progress-bar", distro.url])
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .with_context(|| "failed to spawn curl")?;
+
+            let curl_out = curl_proc.stdout.take().context("failed to pipe curl stdout")?;
+
+            let tar_status = Command::new("tar")
+                .args(["-xzf", "-", "-O", member])
+                .stdin(curl_out)
+                .stdout(out_file)
+                .status()
+                .with_context(|| "failed to execute tar -xzf")?;
+
+            let curl_status = curl_proc.wait().with_context(|| "failed to wait on curl")?;
+
+            if !curl_status.success() || !tar_status.success() {
                 let _ = fs::remove_file(&target_file);
-                bail!("failed to download/extract image from {}", distro.url);
+                bail!(
+                    "failed to download/extract image from {} (curl: {:?}, tar: {:?})",
+                    distro.url,
+                    curl_status.code(),
+                    tar_status.code()
+                );
             }
         }
         ImageFormat::RawXz => {
-            // Check if xz CLI exists, else fallback to python3 lzma streaming
-            let decompress_cmd = if Command::new("which").arg("xz").output().map(|o| o.status.success()).unwrap_or(false) {
-                "xz -dc"
+            let out_file = fs::File::create(&target_file)
+                .with_context(|| format!("failed to create image file at {}", target_file.display()))?;
+
+            let mut curl_proc = Command::new("curl")
+                .args(["-fSL", "--progress-bar", distro.url])
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .with_context(|| "failed to spawn curl")?;
+
+            let curl_out = curl_proc.stdout.take().context("failed to pipe curl stdout")?;
+
+            let has_xz = Command::new("which")
+                .arg("xz")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+
+            let decomp_status = if has_xz {
+                Command::new("xz")
+                    .arg("-dc")
+                    .stdin(curl_out)
+                    .stdout(out_file)
+                    .status()
+                    .with_context(|| "failed to execute xz -dc")?
             } else {
-                "/usr/bin/python3 -c 'import sys, lzma, shutil; shutil.copyfileobj(lzma.LZMAFile(sys.stdin.buffer), sys.stdout.buffer)'"
+                Command::new("/usr/bin/python3")
+                    .args([
+                        "-c",
+                        "import sys, lzma, shutil; shutil.copyfileobj(lzma.LZMAFile(sys.stdin.buffer), sys.stdout.buffer)",
+                    ])
+                    .stdin(curl_out)
+                    .stdout(out_file)
+                    .status()
+                    .with_context(|| "failed to execute python3 lzma decompression")?
             };
 
-            let status = Command::new("sh")
-                .arg("-c")
-                .arg(format!(
-                    "curl -fSL --progress-bar \"{}\" | {} > \"{}\"",
-                    distro.url,
-                    decompress_cmd,
-                    target_file.display()
-                ))
-                .status()
-                .with_context(|| "failed to download and decompress xz image")?;
+            let curl_status = curl_proc.wait().with_context(|| "failed to wait on curl")?;
 
-            if !status.success() {
+            if !curl_status.success() || !decomp_status.success() {
                 let _ = fs::remove_file(&target_file);
-                bail!("failed to download/decompress image from {}", distro.url);
+                bail!(
+                    "failed to download/decompress image from {} (curl: {:?}, decomp: {:?})",
+                    distro.url,
+                    curl_status.code(),
+                    decomp_status.code()
+                );
             }
         }
         ImageFormat::Raw => {
@@ -131,7 +184,7 @@ pub fn ensure_cached_image(cache_dir: &Path, distro: &DistroImage) -> Result<Pat
 
             if !status.success() {
                 let _ = fs::remove_file(&target_file);
-                bail!("failed to download image from {}", distro.url);
+                bail!("failed to download image from {} (status: {:?})", distro.url, status.code());
             }
         }
     }

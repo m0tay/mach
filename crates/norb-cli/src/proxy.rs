@@ -7,10 +7,132 @@ use anyhow::Result;
 use serde_json::Value;
 use std::net::SocketAddr;
 use std::path::Path;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UnixStream};
 
 use crate::commands::load_all_machines;
+
+/// Stream wrapper that yields bytes from an in-memory prefix buffer first,
+/// then transparently delegates all further reading and writing to an underlying `TcpStream`.
+struct PrefixedStream<'a> {
+    prefix: std::io::Cursor<Vec<u8>>,
+    stream: &'a mut TcpStream,
+}
+
+impl<'a> tokio::io::AsyncRead for PrefixedStream<'a> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let pos = self.prefix.position() as usize;
+        let prefix_bytes = self.prefix.get_ref();
+        if pos < prefix_bytes.len() {
+            let slice = &prefix_bytes[pos..];
+            let to_write = std::cmp::min(slice.len(), buf.remaining());
+            buf.put_slice(&slice[..to_write]);
+            self.prefix.set_position((pos + to_write) as u64);
+            Poll::Ready(Ok(()))
+        } else {
+            Pin::new(&mut *self.stream).poll_read(cx, buf)
+        }
+    }
+}
+
+impl<'a> tokio::io::AsyncWrite for PrefixedStream<'a> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut *self.stream).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut *self.stream).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut *self.stream).poll_shutdown(cx)
+    }
+}
+
+/// Decode HTTP/1.1 Transfer-Encoding: chunked body.
+/// Returns decoded bytes, or falls back to raw slice if not valid chunked encoding.
+pub fn decode_chunked_body(raw: &[u8]) -> Vec<u8> {
+    let mut cursor = 0;
+    let mut decoded = Vec::new();
+
+    while cursor < raw.len() {
+        let line_end = match raw[cursor..].windows(2).position(|w| w == b"\r\n") {
+            Some(pos) => cursor + pos,
+            None => match raw[cursor..].iter().position(|&b| b == b'\n') {
+                Some(pos) => cursor + pos,
+                None => {
+                    if decoded.is_empty() {
+                        return raw.to_vec();
+                    }
+                    break;
+                }
+            },
+        };
+
+        let chunk_header = &raw[cursor..line_end];
+        let chunk_header_str = match std::str::from_utf8(chunk_header) {
+            Ok(s) => s.trim(),
+            Err(_) => {
+                if decoded.is_empty() {
+                    return raw.to_vec();
+                }
+                break;
+            }
+        };
+
+        let size_str = chunk_header_str.split(';').next().unwrap_or("").trim();
+        let chunk_size = match usize::from_str_radix(size_str, 16) {
+            Ok(sz) => sz,
+            Err(_) => {
+                if decoded.is_empty() {
+                    return raw.to_vec();
+                }
+                break;
+            }
+        };
+
+        cursor = line_end;
+        if cursor + 2 <= raw.len() && &raw[cursor..cursor + 2] == b"\r\n" {
+            cursor += 2;
+        } else if cursor < raw.len() && raw[cursor] == b'\n' {
+            cursor += 1;
+        }
+
+        if chunk_size == 0 {
+            break;
+        }
+
+        if cursor + chunk_size > raw.len() {
+            decoded.extend_from_slice(&raw[cursor..]);
+            break;
+        }
+
+        decoded.extend_from_slice(&raw[cursor..cursor + chunk_size]);
+        cursor += chunk_size;
+
+        if cursor + 2 <= raw.len() && &raw[cursor..cursor + 2] == b"\r\n" {
+            cursor += 2;
+        } else if cursor < raw.len() && raw[cursor] == b'\n' {
+            cursor += 1;
+        }
+    }
+
+    if decoded.is_empty() && !raw.is_empty() {
+        raw.to_vec()
+    } else {
+        decoded
+    }
+}
 
 /// Container routing target
 #[derive(Debug, Clone)]
@@ -57,19 +179,35 @@ pub async fn run_reverse_proxy(docker_sock: &Path, machines_dir: &Path) -> Resul
 }
 
 async fn handle_proxy_conn(mut client: TcpStream, docker_sock: &Path, machines_dir: &Path) -> Result<()> {
-    let mut header_buf = [0u8; 4096];
-    let n = client.peek(&mut header_buf).await?;
-    if n == 0 {
-        return Ok(());
+    const MAX_HEADER_SIZE: usize = 8192; // 8KB
+    let mut accumulated = Vec::with_capacity(1024);
+    let mut temp_buf = [0u8; 1024];
+
+    loop {
+        let n = client.read(&mut temp_buf).await?;
+        if n == 0 {
+            return Ok(());
+        }
+        accumulated.extend_from_slice(&temp_buf[..n]);
+
+        if accumulated.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+
+        if accumulated.len() >= MAX_HEADER_SIZE {
+            let resp = "HTTP/1.1 431 Request Header Fields Too Large\r\nContent-Length: 32\r\nConnection: close\r\n\r\nRequest Header Fields Too Large\n";
+            let _ = client.write_all(resp.as_bytes()).await;
+            return Ok(());
+        }
     }
 
-    let header_str = String::from_utf8_lossy(&header_buf[..n]);
+    let header_str = String::from_utf8_lossy(&accumulated);
     let host = parse_host_header(&header_str);
 
     let host = match host {
         Some(h) => h,
         None => {
-            let resp = "HTTP/1.1 400 Bad Request\r\nContent-Length: 16\r\n\r\nMissing Host header";
+            let resp = "HTTP/1.1 400 Bad Request\r\nContent-Length: 16\r\nConnection: close\r\n\r\nMissing Host header";
             let _ = client.write_all(resp.as_bytes()).await;
             return Ok(());
         }
@@ -113,7 +251,12 @@ async fn handle_proxy_conn(mut client: TcpStream, docker_sock: &Path, machines_d
         }
     };
 
-    let _ = tokio::io::copy_bidirectional(&mut client, &mut target).await;
+    let mut client_forwarder = PrefixedStream {
+        prefix: std::io::Cursor::new(accumulated),
+        stream: &mut client,
+    };
+
+    let _ = tokio::io::copy_bidirectional(&mut client_forwarder, &mut target).await;
     Ok(())
 }
 
@@ -176,14 +319,35 @@ async fn fetch_container_routes(docker_sock: &Path) -> Result<Vec<RouteTarget>> 
         }
     }
 
-    let body = match split_pos {
-        Some(pos) => &buf[pos..],
+    let (headers, body) = match split_pos {
+        Some(pos) => (&buf[..pos], &buf[pos..]),
         None => return Ok(Vec::new()),
     };
 
-    let containers: Value = match serde_json::from_slice(body) {
+    let is_chunked = String::from_utf8_lossy(headers)
+        .to_ascii_lowercase()
+        .contains("transfer-encoding: chunked");
+
+    let body_bytes = if is_chunked {
+        decode_chunked_body(body)
+    } else {
+        let trimmed = body.iter().find(|&&b| !b.is_ascii_whitespace()).copied();
+        if trimmed == Some(b'[') || trimmed == Some(b'{') {
+            body.to_vec()
+        } else {
+            decode_chunked_body(body)
+        }
+    };
+
+    let containers: Value = match serde_json::from_slice(&body_bytes) {
         Ok(v) => v,
-        Err(_) => return Ok(Vec::new()),
+        Err(_) => {
+            let fallback = decode_chunked_body(body);
+            match serde_json::from_slice(&fallback) {
+                Ok(v) => v,
+                Err(_) => return Ok(Vec::new()),
+            }
+        }
     };
 
     let mut routes = Vec::new();
@@ -269,3 +433,51 @@ fn html_escape(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_host_header() {
+        let headers = "GET / HTTP/1.1\r\nHost: myapp.norb.local:8080\r\nUser-Agent: curl\r\n\r\n";
+        assert_eq!(parse_host_header(headers), Some("myapp.norb.local".to_string()));
+
+        let headers_lowercase = "get / http/1.1\r\nhost: backend.local\r\n\r\n";
+        assert_eq!(parse_host_header(headers_lowercase), Some("backend.local".to_string()));
+
+        let no_host = "GET / HTTP/1.1\r\nUser-Agent: curl\r\n\r\n";
+        assert_eq!(parse_host_header(no_host), None);
+    }
+
+    #[test]
+    fn test_proxy_decode_chunked_body() {
+        let raw = b"7\r\nMozilla\r\n9\r\nDeveloper\r\n7\r\nNetwork\r\n0\r\n\r\n";
+        let decoded = decode_chunked_body(raw);
+        assert_eq!(decoded, b"MozillaDeveloperNetwork");
+    }
+
+    #[test]
+    fn test_find_target_port() {
+        let routes = vec![
+            RouteTarget {
+                name: "web-app".to_string(),
+                compose_service: Some("web".to_string()),
+                compose_project: Some("proj".to_string()),
+                port: 3000,
+            },
+            RouteTarget {
+                name: "db".to_string(),
+                compose_service: None,
+                compose_project: None,
+                port: 5432,
+            },
+        ];
+
+        assert_eq!(find_target_port("web-app.norb.local", &routes), Some(3000));
+        assert_eq!(find_target_port("web.proj.norb.local", &routes), Some(3000));
+        assert_eq!(find_target_port("db.norb.local", &routes), Some(5432));
+        assert_eq!(find_target_port("unknown.norb.local", &routes), None);
+    }
+}
+

@@ -25,6 +25,7 @@ extern "C" {
 ///
 /// If `kernel` is `Some`, boots directly using `VZLinuxBootLoader`.
 /// If `kernel` is `None`, boots using `VZEFIBootLoader` (for cloud images).
+/// VM termination and shutdown events are handled cleanly via `NorbVMDelegate`.
 pub fn run_vz_vm(
     kernel: Option<&Path>,
     initrd: Option<&Path>,

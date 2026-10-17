@@ -6,11 +6,14 @@
 //! - [`MachineConfig`] — static configuration chosen at creation time
 //! - [`Machine`]       — runtime descriptor combining config + dynamic state
 
-use std::{fmt, net::IpAddr};
+use std::{fmt, net::IpAddr, path::Path};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+pub use crate::config::atomic_write;
+use crate::error::{NorbError, Result};
 
 // ---------------------------------------------------------------------------
 // MachineState
@@ -181,6 +184,23 @@ impl Machine {
     pub fn is_live(&self) -> bool {
         matches!(self.state, MachineState::Starting | MachineState::Running)
     }
+
+    /// Persist this machine descriptor to disk under `machines_dir` atomically.
+    pub fn save(&self, machines_dir: &Path) -> Result<()> {
+        save_machine(machines_dir, self)
+    }
+}
+
+/// Persist a machine descriptor to disk inside `<machines_dir>/<machine.config.name>/machine.json`
+/// using atomic file write semantics to prevent 0-byte corruptions.
+pub fn save_machine(machines_dir: &Path, machine: &Machine) -> Result<()> {
+    let dir = machines_dir.join(&machine.config.name);
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("machine.json");
+    let content = serde_json::to_string_pretty(machine)
+        .map_err(|e| NorbError::Machine(format!("failed to serialize machine {}: {e}", machine.config.name)))?;
+    atomic_write(&path, content.as_bytes())?;
+    Ok(())
 }
 
 impl fmt::Display for Machine {

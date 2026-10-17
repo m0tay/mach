@@ -9,5 +9,6 @@
 
 pub mod config;
 pub mod error;
+pub mod fs;
 pub mod logging;
 pub mod machine;

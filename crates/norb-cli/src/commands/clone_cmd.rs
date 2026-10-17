@@ -4,7 +4,6 @@ use anyhow::{bail, Context, Result};
 use norb_common::config::NorbConfig;
 use norb_common::machine::MachineState;
 use std::fs;
-use std::process::Command;
 use uuid::Uuid;
 
 use crate::commands::{find_machine, save_machine};
@@ -34,15 +33,8 @@ pub async fn run(source_name: &str, target_name: &str) -> Result<()> {
     let target_disk = target_dir.join("disk.raw");
 
     if src_disk.exists() {
-        // Use APFS copy-on-write clone (/bin/cp -c) for instant 0-byte snapshot
-        let status = Command::new("/bin/cp")
-            .args(["-c", src_disk.to_str().unwrap(), target_disk.to_str().unwrap()])
-            .status()
-            .with_context(|| "failed to invoke /bin/cp -c")?;
-
-        if !status.success() {
-            fs::copy(&src_disk, &target_disk)?;
-        }
+        norb_common::fs::apfs_clone(&src_disk, &target_disk)
+            .with_context(|| format!("failed to clone disk from {} to {}", src_disk.display(), target_disk.display()))?;
     }
 
     // Build new machine descriptor

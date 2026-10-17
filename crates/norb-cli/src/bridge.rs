@@ -32,7 +32,37 @@ pub struct BridgeResponse {
     pub error: Option<String>,
 }
 
-/// Run the background TCP listener for the macOS host bridge on 0.0.0.0:32222
+/// Check if a peer IP is permitted to communicate with the host bridge.
+/// Permitted: loopback (127.0.0.1 / ::1) or macOS hypervisor bridge network (192.168.64.0/24).
+fn is_allowed_peer(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback() || (v4.octets()[0] == 192 && v4.octets()[1] == 168 && v4.octets()[2] == 64)
+        }
+        IpAddr::V6(v6) => v6.is_loopback(),
+    }
+}
+
+async fn handle_client(mut socket: tokio::net::TcpStream, peer: SocketAddr) {
+    if !is_allowed_peer(&peer.ip()) {
+        tracing::warn!(peer = %peer, "Host bridge rejected unauthorized external connection");
+        return;
+    }
+
+    let (reader, mut writer) = socket.split();
+    let mut buf_reader = BufReader::new(reader);
+    let mut line = String::new();
+
+    if buf_reader.read_line(&mut line).await.is_ok() {
+        let resp = handle_request(&line);
+        let serialized = serde_json::to_string(&resp).unwrap_or_default() + "\n";
+        let _ = writer.write_all(serialized.as_bytes()).await;
+    }
+}
+
+/// Run the background TCP listener for the macOS host bridge on port 32222.
+/// Binds to 0.0.0.0:32222 with strict IP verification to only accept connections
+/// from 127.0.0.1 or 192.168.64.0/24.
 pub async fn run_host_bridge(_run_dir: &Path) -> Result<()> {
     let addr = SocketAddr::from(([0, 0, 0, 0], 32222));
     let listener = TcpListener::bind(addr)
@@ -41,18 +71,8 @@ pub async fn run_host_bridge(_run_dir: &Path) -> Result<()> {
 
     loop {
         match listener.accept().await {
-            Ok((mut socket, _peer)) => {
-                tokio::spawn(async move {
-                    let (reader, mut writer) = socket.split();
-                    let mut buf_reader = BufReader::new(reader);
-                    let mut line = String::new();
-
-                    if buf_reader.read_line(&mut line).await.is_ok() {
-                        let resp = handle_request(&line);
-                        let serialized = serde_json::to_string(&resp).unwrap_or_default() + "\n";
-                        let _ = writer.write_all(serialized.as_bytes()).await;
-                    }
-                });
+            Ok((socket, peer)) => {
+                tokio::spawn(handle_client(socket, peer));
             }
             Err(e) => {
                 eprintln!("[bridge] Accept error: {e:?}");
@@ -224,16 +244,14 @@ pub fn install_guest_mac_cli(ip: IpAddr) -> Result<()> {
         GUEST_MAC_SCRIPT
     );
 
-    let _ = Command::new("ssh")
-        .args([
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
-            "-o", "LogLevel=ERROR",
-            "-o", "ConnectTimeout=2",
-            &format!("root@{ip}"),
-            &script,
-        ])
-        .output();
+    let mut cmd = Command::new("ssh");
+    cmd.args(crate::ssh::norb_ssh_args());
+    cmd.args([
+        "-o", "ConnectTimeout=2",
+        &format!("root@{ip}"),
+        &script,
+    ]);
+    let _ = cmd.output();
 
     Ok(())
 }

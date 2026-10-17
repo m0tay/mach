@@ -3,9 +3,9 @@
 use anyhow::{bail, Context, Result};
 use norb_common::config::NorbConfig;
 use norb_common::machine::MachineState;
-use std::process::Command;
+use std::os::unix::process::ExitStatusExt;
 
-use super::{find_machine, load_all_machines};
+use super::{find_machine, resolve_target_machine};
 
 pub async fn run(
     machine_opt: Option<&str>,
@@ -18,40 +18,15 @@ pub async fn run(
 
     let cfg = NorbConfig::load()?;
     let mut effective_cmd = command;
-    let target_name = match machine_opt {
-        Some(n) => n.to_string(),
+
+    let target_name_opt = match machine_opt {
+        Some(n) => Some(n),
         None => {
             if command.len() > 1 && find_machine(&cfg.machines_dir, &command[0])?.is_some() {
-                let name = command[0].clone();
                 effective_cmd = &command[1..];
-                name
+                Some(command[0].as_str())
             } else {
-                let machines = load_all_machines(&cfg.machines_dir)?;
-                if let Some(ref def) = cfg.default_machine {
-                    if machines.iter().any(|m| &m.config.name == def) {
-                        def.clone()
-                    } else if let Some(running) = machines.iter().find(|m| m.state == MachineState::Running) {
-                        running.config.name.clone()
-                    } else if !machines.is_empty() {
-                        machines[0].config.name.clone()
-                    } else {
-                        bail!("no machines found. Run `norb create <distro>` first.");
-                    }
-                } else {
-                    let running: Vec<_> = machines
-                        .iter()
-                        .filter(|m| m.state == MachineState::Running)
-                        .collect();
-                    if running.is_empty() {
-                        if !machines.is_empty() {
-                            machines[0].config.name.clone()
-                        } else {
-                            bail!("no machines found. Run `norb create <distro>` first.");
-                        }
-                    } else {
-                        running[0].config.name.clone()
-                    }
-                }
+                None
             }
         }
     };
@@ -60,14 +35,14 @@ pub async fn run(
         bail!("no command specified to run");
     }
 
-    let mut machine = find_machine(&cfg.machines_dir, &target_name)?
-        .with_context(|| format!("machine '{target_name}' not found"))?;
+    let mut machine = resolve_target_machine(&cfg, target_name_opt)?;
 
     // Auto-start if stopped
     if machine.state != MachineState::Running {
-        println!("\x1b[1;36m➜\x1b[0m Starting machine \x1b[1m{}\x1b[0m...", target_name);
-        super::start::run(Some(&target_name)).await?;
-        machine = find_machine(&cfg.machines_dir, &target_name)?.unwrap();
+        println!("\x1b[1;36m➜\x1b[0m Starting machine \x1b[1m{}\x1b[0m...", machine.config.name);
+        super::start::run(Some(&machine.config.name)).await?;
+        machine = find_machine(&cfg.machines_dir, &machine.config.name)?
+            .with_context(|| format!("machine '{}' not found after start", machine.config.name))?;
     }
 
     let ip = machine
@@ -75,16 +50,18 @@ pub async fn run(
         .with_context(|| format!("machine '{}' has no IP address assigned", machine.config.name))?;
 
     let user = user_opt.unwrap_or("root");
-    let ip_str = ip.to_string();
 
-    let mut ssh_args = crate::ssh::norb_ssh_args();
-    ssh_args.push(format!("{user}@{ip_str}"));
-    ssh_args.extend(effective_cmd.iter().cloned());
+    let mut cmd = crate::ssh::new_ssh_command(&ip, user);
+    cmd.args(effective_cmd);
 
-    let status = Command::new("ssh").args(&ssh_args).status()?;
+    let status = cmd.status()?;
     if !status.success() {
         if let Some(code) = status.code() {
             std::process::exit(code);
+        } else if let Some(sig) = status.signal() {
+            std::process::exit(128 + sig);
+        } else {
+            std::process::exit(1);
         }
     }
 

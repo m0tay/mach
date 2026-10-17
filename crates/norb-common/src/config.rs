@@ -158,10 +158,25 @@ impl NorbConfig {
             NorbError::Config(format!("failed to serialise config: {e}"))
         })?;
 
-        std::fs::write(&path, json)?;
+        atomic_write(&path, json.as_bytes())?;
 
         tracing::debug!(path = %path.display(), "config saved");
 
         Ok(())
     }
+}
+
+/// Write data to a temporary file `<path>.tmp.<pid>` and atomically rename it to
+/// `<path>` to prevent 0-byte file corruptions.
+pub fn atomic_write(path: impl AsRef<std::path::Path>, content: impl AsRef<[u8]>) -> std::io::Result<()> {
+    let path = path.as_ref();
+    let pid = std::process::id();
+    let tmp_path = PathBuf::from(format!("{}.tmp.{}", path.display(), pid));
+
+    std::fs::write(&tmp_path, content)?;
+    if let Err(e) = std::fs::rename(&tmp_path, path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e);
+    }
+    Ok(())
 }

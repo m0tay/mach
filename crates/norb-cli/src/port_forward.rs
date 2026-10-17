@@ -81,6 +81,88 @@ pub async fn run_port_forwarder(docker_sock: &Path, machines_dir: &Path) -> Resu
     }
 }
 
+/// Decode HTTP/1.1 Transfer-Encoding: chunked body.
+/// Returns decoded bytes, or falls back to raw slice if not valid chunked encoding.
+pub fn decode_chunked_body(raw: &[u8]) -> Vec<u8> {
+    let mut cursor = 0;
+    let mut decoded = Vec::new();
+
+    while cursor < raw.len() {
+        // Find CRLF or LF marking end of chunk size line
+        let line_end = match raw[cursor..].windows(2).position(|w| w == b"\r\n") {
+            Some(pos) => cursor + pos,
+            None => match raw[cursor..].iter().position(|&b| b == b'\n') {
+                Some(pos) => cursor + pos,
+                None => {
+                    if decoded.is_empty() {
+                        return raw.to_vec();
+                    }
+                    break;
+                }
+            },
+        };
+
+        let chunk_header = &raw[cursor..line_end];
+        let chunk_header_str = match std::str::from_utf8(chunk_header) {
+            Ok(s) => s.trim(),
+            Err(_) => {
+                if decoded.is_empty() {
+                    return raw.to_vec();
+                }
+                break;
+            }
+        };
+
+        // Chunk extensions might follow ';' (e.g. "1f;foo=bar")
+        let size_str = chunk_header_str.split(';').next().unwrap_or("").trim();
+        let chunk_size = match usize::from_str_radix(size_str, 16) {
+            Ok(sz) => sz,
+            Err(_) => {
+                if decoded.is_empty() {
+                    return raw.to_vec();
+                }
+                break;
+            }
+        };
+
+        // Advance cursor past the chunk header line
+        cursor = line_end;
+        if cursor + 2 <= raw.len() && &raw[cursor..cursor + 2] == b"\r\n" {
+            cursor += 2;
+        } else if cursor < raw.len() && raw[cursor] == b'\n' {
+            cursor += 1;
+        }
+
+        // 0-sized chunk signals end of chunked stream
+        if chunk_size == 0 {
+            break;
+        }
+
+        // Read chunk data
+        if cursor + chunk_size > raw.len() {
+            // Incomplete chunk: take whatever remains
+            decoded.extend_from_slice(&raw[cursor..]);
+            break;
+        }
+
+        decoded.extend_from_slice(&raw[cursor..cursor + chunk_size]);
+        cursor += chunk_size;
+
+        // Skip the chunk-closing CRLF / LF
+        if cursor + 2 <= raw.len() && &raw[cursor..cursor + 2] == b"\r\n" {
+            cursor += 2;
+        } else if cursor < raw.len() && raw[cursor] == b'\n' {
+            cursor += 1;
+        }
+    }
+
+    if decoded.is_empty() && !raw.is_empty() {
+        raw.to_vec()
+    } else {
+        decoded
+    }
+}
+
 async fn fetch_published_ports(docker_sock: &Path) -> Result<Vec<u16>> {
     let mut stream = UnixStream::connect(docker_sock).await?;
     stream
@@ -100,14 +182,35 @@ async fn fetch_published_ports(docker_sock: &Path) -> Result<Vec<u16>> {
         }
     }
 
-    let body = match split_pos {
-        Some(pos) => &buf[pos..],
+    let (headers, body) = match split_pos {
+        Some(pos) => (&buf[..pos], &buf[pos..]),
         None => return Ok(Vec::new()),
     };
 
-    let containers: Vec<serde_json::Value> = match serde_json::from_slice(body) {
+    let is_chunked = String::from_utf8_lossy(headers)
+        .to_ascii_lowercase()
+        .contains("transfer-encoding: chunked");
+
+    let body_bytes = if is_chunked {
+        decode_chunked_body(body)
+    } else {
+        let trimmed = body.iter().find(|&&b| !b.is_ascii_whitespace()).copied();
+        if trimmed == Some(b'[') || trimmed == Some(b'{') {
+            body.to_vec()
+        } else {
+            decode_chunked_body(body)
+        }
+    };
+
+    let containers: Vec<serde_json::Value> = match serde_json::from_slice(&body_bytes) {
         Ok(c) => c,
-        Err(_) => return Ok(Vec::new()),
+        Err(_) => {
+            let fallback = decode_chunked_body(body);
+            match serde_json::from_slice(&fallback) {
+                Ok(c) => c,
+                Err(_) => return Ok(Vec::new()),
+            }
+        }
     };
 
     let mut published = Vec::new();
@@ -150,3 +253,30 @@ async fn forward_loop(listener: TcpListener, target: SocketAddr, mut cancel_rx: 
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decode_chunked_body_basic() {
+        let chunked = b"4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n";
+        let decoded = decode_chunked_body(chunked);
+        assert_eq!(decoded, b"Wikipedia");
+    }
+
+    #[test]
+    fn test_decode_chunked_body_with_extension() {
+        let chunked = b"5;foo=bar\r\nhello\r\n0\r\n\r\n";
+        let decoded = decode_chunked_body(chunked);
+        assert_eq!(decoded, b"hello");
+    }
+
+    #[test]
+    fn test_decode_unchunked_fallback() {
+        let raw = b"[{\"Id\":\"test-container\"}]";
+        let decoded = decode_chunked_body(raw);
+        assert_eq!(decoded, raw);
+    }
+}
+

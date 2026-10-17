@@ -5,13 +5,85 @@
 //! - `host.norb.internal` / `host.docker.internal` -> Host gateway IP (192.168.64.1)
 
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
+use std::sync::RwLock;
+use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 
 use crate::commands::load_all_machines;
 
 pub const DNS_PORT: u16 = 5354;
+pub const DNS_CACHE_TTL: Duration = Duration::from_secs(2);
+
+/// In-memory cache entry for machine names to IPv4 addresses.
+#[derive(Debug, Clone)]
+pub struct DnsCacheEntry {
+    pub last_updated: Instant,
+    pub machines: HashMap<String, Ipv4Addr>,
+}
+
+/// Global thread-safe in-memory cache with 2-second TTL.
+pub static DNS_CACHE: RwLock<Option<DnsCacheEntry>> = RwLock::new(None);
+
+/// Resolve a machine name to an IP using the cache if valid, or refreshing from disk.
+pub fn resolve_machine_ip(machines_dir: &Path, prefix: &str) -> Ipv4Addr {
+    let now = Instant::now();
+
+    // 1. Fast path: check valid cache under read lock
+    {
+        let guard = match DNS_CACHE.read() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        if let Some(ref cache) = *guard {
+            if now.duration_since(cache.last_updated) < DNS_CACHE_TTL {
+                return cache
+                    .machines
+                    .get(prefix)
+                    .copied()
+                    .unwrap_or(Ipv4Addr::new(127, 0, 0, 1));
+            }
+        }
+    }
+
+    // 2. Slow path: acquire write lock and refresh if still expired
+    let mut guard = match DNS_CACHE.write() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+
+    if let Some(ref cache) = *guard {
+        if now.duration_since(cache.last_updated) < DNS_CACHE_TTL {
+            return cache
+                .machines
+                .get(prefix)
+                .copied()
+                .unwrap_or(Ipv4Addr::new(127, 0, 0, 1));
+        }
+    }
+
+    let machines = load_all_machines(machines_dir).unwrap_or_default();
+    let mut map = HashMap::new();
+    for m in machines {
+        if let Some(std::net::IpAddr::V4(v4)) = m.ip_address {
+            map.insert(m.config.name.to_ascii_lowercase(), v4);
+        }
+    }
+
+    let resolved = map
+        .get(prefix)
+        .copied()
+        .unwrap_or(Ipv4Addr::new(127, 0, 0, 1));
+
+    *guard = Some(DnsCacheEntry {
+        last_updated: now,
+        machines: map,
+    });
+
+    resolved
+}
 
 /// Run the DNS responder loop asynchronously.
 pub async fn run_dns_server(machines_dir: &Path) -> Result<()> {
@@ -76,19 +148,7 @@ pub fn handle_dns_query(packet: &[u8], machines_dir: &Path) -> Option<Vec<u8>> {
         if prefix == "host" || prefix == "gateway" {
             Some(Ipv4Addr::new(192, 168, 64, 1))
         } else {
-            let machines = load_all_machines(machines_dir).unwrap_or_default();
-            let machine_ip = machines
-                .into_iter()
-                .find(|m| m.config.name.eq_ignore_ascii_case(prefix))
-                .and_then(|m| m.ip_address)
-                .and_then(|ip| match ip {
-                    std::net::IpAddr::V4(v4) => Some(v4),
-                    _ => None,
-                });
-
-            // If it matches a machine name, return the VM's DHCP IP;
-            // otherwise, return 127.0.0.1 to route container HTTP traffic to Norb's local reverse proxy.
-            Some(machine_ip.unwrap_or(Ipv4Addr::new(127, 0, 0, 1)))
+            Some(resolve_machine_ip(machines_dir, prefix))
         }
     } else if domain == "host.docker.internal" || domain == "host.norb.internal" {
         Some(Ipv4Addr::new(192, 168, 64, 1))
@@ -156,3 +216,34 @@ pub fn check_or_setup_resolver() -> (bool, Option<String>) {
     let setup_cmd = "sudo mkdir -p /etc/resolver && sudo tee /etc/resolver/norb.local <<< 'nameserver 127.0.0.1\nport 5354'".to_string();
     (false, Some(setup_cmd))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_dns_cache_resolution() {
+        let temp_dir = std::env::temp_dir().join("norb_dns_test");
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        // Pre-populate cache directly
+        {
+            let mut guard = DNS_CACHE.write().unwrap();
+            let mut map = HashMap::new();
+            map.insert("testvm".to_string(), Ipv4Addr::new(192, 168, 64, 42));
+            *guard = Some(DnsCacheEntry {
+                last_updated: Instant::now(),
+                machines: map,
+            });
+        }
+
+        // Hit cache
+        let ip = resolve_machine_ip(&temp_dir, "testvm");
+        assert_eq!(ip, Ipv4Addr::new(192, 168, 64, 42));
+
+        // Unknown machine routes to 127.0.0.1
+        let ip2 = resolve_machine_ip(&temp_dir, "unknown-container");
+        assert_eq!(ip2, Ipv4Addr::new(127, 0, 0, 1));
+    }
+}
+

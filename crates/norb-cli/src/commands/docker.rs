@@ -18,10 +18,34 @@ pub async fn setup(system: bool) -> Result<()> {
                 check_args.extend(["-o".to_string(), "ConnectTimeout=2".to_string(), format!("root@{ip}"), "test -S /var/run/docker.sock".to_string()]);
                 let is_running = Command::new("ssh").args(&check_args).status().map(|s| s.success()).unwrap_or(false);
                 if !is_running {
+                    let distro = m.config.distro.to_ascii_lowercase();
+                    let start_cmd = if distro.contains("alpine") {
+                        "which dockerd >/dev/null || (apk add --no-cache docker >/dev/null 2>&1 || true); dockerd --data-root /var/lib/docker >/dev/null 2>&1 &"
+                    } else if distro.contains("debian") || distro.contains("ubuntu") {
+                        "which dockerd >/dev/null || (apt-get update -y >/dev/null 2>&1 && apt-get install -y docker.io >/dev/null 2>&1 || true); systemctl enable --now docker >/dev/null 2>&1 || true"
+                    } else if distro.contains("fedora") {
+                        "which dockerd >/dev/null || (dnf install -y docker-ce >/dev/null 2>&1 || dnf install -y moby-engine >/dev/null 2>&1 || dnf install -y docker >/dev/null 2>&1 || true); systemctl enable --now docker >/dev/null 2>&1 || true"
+                    } else {
+                        "if [ -f /etc/alpine-release ]; then \
+                            which dockerd >/dev/null || (apk add --no-cache docker >/dev/null 2>&1 || true); dockerd --data-root /var/lib/docker >/dev/null 2>&1 & \
+                        elif command -v apt-get >/dev/null 2>&1; then \
+                            which dockerd >/dev/null || (apt-get update -y >/dev/null 2>&1 && apt-get install -y docker.io >/dev/null 2>&1 || true); systemctl enable --now docker >/dev/null 2>&1 || true; \
+                        elif command -v dnf >/dev/null 2>&1; then \
+                            which dockerd >/dev/null || (dnf install -y docker-ce >/dev/null 2>&1 || dnf install -y moby-engine >/dev/null 2>&1 || dnf install -y docker >/dev/null 2>&1 || true); systemctl enable --now docker >/dev/null 2>&1 || true; \
+                        else \
+                            dockerd --data-root /var/lib/docker >/dev/null 2>&1 & \
+                        fi"
+                    };
+
                     let mut start_args = base_ssh.clone();
-                    start_args.extend(["-o".to_string(), "ConnectTimeout=10".to_string(), format!("root@{ip}"), "which dockerd >/dev/null || (apk add --no-cache docker >/dev/null 2>&1 || true); dockerd --data-root /var/lib/docker >/dev/null 2>&1 &".to_string()]);
+                    start_args.extend(["-o".to_string(), "ConnectTimeout=15".to_string(), format!("root@{ip}"), start_cmd.to_string()]);
                     let _ = Command::new("ssh").args(&start_args).status();
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    for _ in 0..10 {
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        if Command::new("ssh").args(&check_args).status().map(|s| s.success()).unwrap_or(false) {
+                            break;
+                        }
+                    }
                 }
 
                 let run_dir = cfg.data_dir.join("run");

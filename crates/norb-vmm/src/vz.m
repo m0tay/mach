@@ -1,6 +1,25 @@
 #import <Virtualization/Virtualization.h>
 #import <Foundation/Foundation.h>
 
+@interface NorbVMDelegate : NSObject <VZVirtualMachineDelegate>
+@end
+
+@implementation NorbVMDelegate
+
+- (void)guestDidStopVirtualMachine:(VZVirtualMachine *)virtualMachine {
+    NSLog(@"[norb-vmm] Guest stopped the virtual machine.");
+    CFRunLoopStop(CFRunLoopGetCurrent());
+    CFRunLoopStop(CFRunLoopGetMain());
+}
+
+- (void)virtualMachine:(VZVirtualMachine *)virtualMachine didStopWithError:(NSError *)error {
+    NSLog(@"[norb-vmm] Virtual machine stopped with error: %@", error);
+    CFRunLoopStop(CFRunLoopGetCurrent());
+    CFRunLoopStop(CFRunLoopGetMain());
+}
+
+@end
+
 int vz_start_vm(
     const char *kernel_path,
     const char *initrd_path,
@@ -175,6 +194,8 @@ int vz_start_vm(
         }
 
         VZVirtualMachine *vm = [[VZVirtualMachine alloc] initWithConfiguration:config];
+        NorbVMDelegate *delegate = [[NorbVMDelegate alloc] init];
+        [vm setDelegate:delegate];
 
         dispatch_semaphore_t sema = dispatch_semaphore_create(0);
         __block int start_result = 0;
@@ -199,7 +220,8 @@ int vz_start_vm(
         }
 
         // Run the main runloop continuously to process virtual device events
-        [[NSRunLoop currentRunLoop] run];
+        CFRunLoopRun();
+        (void)delegate;
         return 0;
     }
 }

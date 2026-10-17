@@ -27,31 +27,51 @@ pub async fn run_foreground() -> Result<()> {
 
     let m_dir = machines_dir.clone();
     let dns_task = tokio::spawn(async move {
-        if let Err(e) = dns::run_dns_server(&m_dir).await {
-            eprintln!("[norb-daemon] DNS responder error: {e:?}");
+        loop {
+            if let Err(e) = dns::run_dns_server(&m_dir).await {
+                eprintln!("[norb-daemon] DNS responder error: {e:?}. Restarting in 1s...");
+            } else {
+                eprintln!("[norb-daemon] DNS responder stopped unexpectedly. Restarting in 1s...");
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     });
 
     let ds_clone = docker_sock.clone();
     let m_dir2 = machines_dir.clone();
     let forwarder_task = tokio::spawn(async move {
-        if let Err(e) = port_forward::run_port_forwarder(&ds_clone, &m_dir2).await {
-            eprintln!("[norb-daemon] Port forwarder error: {e:?}");
+        loop {
+            if let Err(e) = port_forward::run_port_forwarder(&ds_clone, &m_dir2).await {
+                eprintln!("[norb-daemon] Port forwarder error: {e:?}. Restarting in 1s...");
+            } else {
+                eprintln!("[norb-daemon] Port forwarder stopped unexpectedly. Restarting in 1s...");
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     });
 
     let ds_clone2 = docker_sock.clone();
     let m_dir3 = machines_dir.clone();
     let proxy_task = tokio::spawn(async move {
-        if let Err(e) = crate::proxy::run_reverse_proxy(&ds_clone2, &m_dir3).await {
-            eprintln!("[norb-daemon] Reverse proxy error: {e:?}");
+        loop {
+            if let Err(e) = crate::proxy::run_reverse_proxy(&ds_clone2, &m_dir3).await {
+                eprintln!("[norb-daemon] Reverse proxy error: {e:?}. Restarting in 1s...");
+            } else {
+                eprintln!("[norb-daemon] Reverse proxy stopped unexpectedly. Restarting in 1s...");
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     });
 
     let rd_clone = run_dir.clone();
     let bridge_task = tokio::spawn(async move {
-        if let Err(e) = crate::bridge::run_host_bridge(&rd_clone).await {
-            eprintln!("[norb-daemon] Host bridge error: {e:?}");
+        loop {
+            if let Err(e) = crate::bridge::run_host_bridge(&rd_clone).await {
+                eprintln!("[norb-daemon] Host bridge error: {e:?}. Restarting in 1s...");
+            } else {
+                eprintln!("[norb-daemon] Host bridge stopped unexpectedly. Restarting in 1s...");
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     });
 

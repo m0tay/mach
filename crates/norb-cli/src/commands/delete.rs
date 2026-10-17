@@ -1,16 +1,33 @@
 //! `norb delete` / `norb rm` command implementation.
 
-use anyhow::{Context, Result};
+use std::io::{self, IsTerminal, Write};
+use anyhow::{bail, Context, Result};
 use norb_common::config::NorbConfig;
 use std::fs;
 
 use super::find_machine;
 
-pub async fn run(name: &str, _yes: bool) -> Result<()> {
+pub async fn run(name: &str, yes: bool) -> Result<()> {
     let cfg = NorbConfig::load()?;
 
     let machine = find_machine(&cfg.machines_dir, name)?
         .with_context(|| format!("machine '{name}' not found"))?;
+
+    if !yes {
+        if io::stdin().is_terminal() {
+            print!("Delete machine '{}' and all its data? [y/N]: ", machine.config.name);
+            io::stdout().flush()?;
+            let mut line = String::new();
+            io::stdin().read_line(&mut line)?;
+            let trimmed = line.trim();
+            if !trimmed.eq_ignore_ascii_case("y") && !trimmed.eq_ignore_ascii_case("yes") {
+                println!("Aborted.");
+                return Ok(());
+            }
+        } else {
+            bail!("cannot delete machine in non-interactive environment without --yes / -y flag");
+        }
+    }
 
     // Ensure any running VMM process is terminated
     let _ = super::stop::run(Some(&machine.config.name), true).await;

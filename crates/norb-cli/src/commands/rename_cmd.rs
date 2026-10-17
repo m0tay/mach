@@ -30,6 +30,11 @@ pub async fn run(old_name: &str, new_name: &str) -> Result<()> {
     machine.config.name = new_name.to_string();
     save_machine(&cfg.machines_dir, &machine)?;
 
+    let cidata_path = new_dir.join("cidata.iso");
+    if cidata_path.exists() {
+        crate::cloud_init::generate_cidata_iso(&machine.id, new_name, &cidata_path)?;
+    }
+
     if cfg.default_machine.as_deref() == Some(old_name) {
         cfg.default_machine = Some(new_name.to_string());
         cfg.save()?;

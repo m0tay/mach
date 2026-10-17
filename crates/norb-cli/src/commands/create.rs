@@ -3,9 +3,9 @@
 use anyhow::{bail, Result};
 use norb_common::config::NorbConfig;
 use norb_common::machine::{Architecture, Machine, MachineConfig, MachineState};
-use std::process::Command;
+use std::collections::HashSet;
 
-use super::{find_machine, save_machine};
+use super::save_machine;
 use crate::cloud_init;
 use crate::images;
 
@@ -19,33 +19,39 @@ pub async fn run(
 ) -> Result<()> {
     let mut cfg = NorbConfig::load()?;
 
-    let is_machine_taken = |m_name: &str| -> Result<bool> {
-        if find_machine(&cfg.machines_dir, m_name)?.is_some() {
-            return Ok(true);
+    let mut existing_names = HashSet::new();
+    if cfg.machines_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&cfg.machines_dir) {
+            for entry in entries.flatten() {
+                if let Ok(entry_name) = entry.file_name().into_string() {
+                    existing_names.insert(entry_name.to_lowercase());
+                }
+            }
         }
-        if cfg.machines_dir.join(m_name).exists() {
-            return Ok(true);
+    }
+    if let Ok(machines) = super::load_all_machines(&cfg.machines_dir) {
+        for m in machines {
+            existing_names.insert(m.config.name.to_lowercase());
         }
-        Ok(false)
-    };
+    }
 
     let machine_name = match name {
         Some(explicit_name) => {
             let m_name = explicit_name.to_lowercase();
-            if is_machine_taken(&m_name)? {
+            if existing_names.contains(&m_name) {
                 bail!("machine '{m_name}' already exists");
             }
             m_name
         }
         None => {
             let base = distro.to_lowercase();
-            if !is_machine_taken(&base)? {
+            if !existing_names.contains(&base) {
                 base
             } else {
                 let mut idx = 2;
                 loop {
                     let candidate = format!("{base}-{idx}");
-                    if !is_machine_taken(&candidate)? {
+                    if !existing_names.contains(&candidate) {
                         break candidate;
                     }
                     idx += 1;
@@ -110,13 +116,7 @@ pub async fn run(
 
         if !disk_path.exists() {
             println!("  \x1b[1;36m➜\x1b[0m Provisioning disk image (APFS instant clone)...");
-            let cp_status = Command::new("/bin/cp")
-                .args(["-c", cached_raw.to_str().unwrap(), disk_path.to_str().unwrap()])
-                .status();
-
-            if cp_status.is_err() || !cp_status.unwrap().success() {
-                std::fs::copy(&cached_raw, &disk_path)?;
-            }
+            norb_common::fs::apfs_clone(&cached_raw, &disk_path)?;
 
             // Expand disk to requested size
             let file = std::fs::OpenOptions::new().write(true).open(&disk_path)?;

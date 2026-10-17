@@ -7,12 +7,14 @@ use std::process::Command;
 use uuid::Uuid;
 
 /// Locate the host user's SSH public keys to inject into the VM, including Norb's dedicated key.
+/// Locate the host user's SSH public keys to inject into the VM, including Norb's dedicated key.
 pub fn get_host_ssh_keys() -> Vec<String> {
     let mut keys = Vec::new();
 
     // Include Norb's dedicated key
     if let Ok(_) = crate::ssh::ensure_norb_ssh_key() {
-        let pub_key_path = norb_common::config::NorbConfig::default().data_dir.join("ssh").join("id_ed25519.pub");
+        let cfg = norb_common::config::NorbConfig::load().unwrap_or_default();
+        let pub_key_path = cfg.data_dir.join("ssh").join("id_ed25519.pub");
         if let Ok(content) = fs::read_to_string(&pub_key_path) {
             let trimmed = content.trim();
             if !trimmed.is_empty() {
@@ -36,6 +38,17 @@ pub fn get_host_ssh_keys() -> Vec<String> {
     keys
 }
 
+/// RAII guard to ensure temporary cloud-init directory is always cleaned up on exit.
+struct TempDirGuard {
+    path: std::path::PathBuf,
+}
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
 /// Generate a cloud-init NoCloud ISO image (`cidata.iso`) using macOS native `hdiutil`.
 pub fn generate_cidata_iso(
     machine_id: &Uuid,
@@ -45,6 +58,7 @@ pub fn generate_cidata_iso(
     let temp_dir = std::env::temp_dir().join(format!("cidata_{}", machine_id));
     let _ = fs::remove_dir_all(&temp_dir);
     fs::create_dir_all(&temp_dir)?;
+    let _guard = TempDirGuard { path: temp_dir.clone() };
 
     let meta_data = format!(
         "instance-id: {}\nlocal-hostname: {}\n",
@@ -139,8 +153,6 @@ ethernets:
         ])
         .output()
         .with_context(|| "failed to execute hdiutil to create cidata.iso")?;
-
-    let _ = fs::remove_dir_all(&temp_dir);
 
     if !status.status.success() {
         let err = String::from_utf8_lossy(&status.stderr);

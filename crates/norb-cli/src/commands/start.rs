@@ -6,7 +6,8 @@ use norb_common::machine::MachineState;
 use std::fs;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, SystemTime};
 use tokio::time::sleep;
 
 use super::{find_machine, load_all_machines, save_machine};
@@ -46,8 +47,25 @@ fn generate_mac(machine_id: &uuid::Uuid) -> (String, String) {
     (full_mac, lease_mac)
 }
 
+static LEASE_CACHE: Mutex<Option<(SystemTime, String, u64, u64)>> = Mutex::new(None);
+
 /// Get the latest lease expiration timestamps currently recorded for a machine's MAC and name.
 fn get_machine_lease_timestamps(name: &str, mac_patterns: &[String]) -> (u64, u64) {
+    let Ok(meta) = fs::metadata("/var/db/dhcpd_leases") else {
+        return (0, 0);
+    };
+    let Ok(mtime) = meta.modified() else {
+        return (0, 0);
+    };
+
+    if let Ok(guard) = LEASE_CACHE.lock() {
+        if let Some((cached_mtime, cached_name, mac_ts, name_ts)) = &*guard {
+            if *cached_mtime == mtime && cached_name == name {
+                return (*mac_ts, *name_ts);
+            }
+        }
+    }
+
     let Ok(content) = fs::read_to_string("/var/db/dhcpd_leases") else {
         return (0, 0);
     };
@@ -80,6 +98,11 @@ fn get_machine_lease_timestamps(name: &str, mac_patterns: &[String]) -> (u64, u6
             max_name_ts = lease_time;
         }
     }
+
+    if let Ok(mut guard) = LEASE_CACHE.lock() {
+        *guard = Some((mtime, name.to_string(), max_mac_ts, max_name_ts));
+    }
+
     (max_mac_ts, max_name_ts)
 }
 
@@ -246,9 +269,15 @@ pub async fn run(name: Option<&str>) -> Result<()> {
     std::io::Write::flush(&mut std::io::stdout())?;
 
     let mut assigned_ip = None;
+    let mut last_leases_mtime = None;
 
     for _ in 0..150 {
         sleep(Duration::from_millis(200)).await;
+        let current_mtime = fs::metadata("/var/db/dhcpd_leases").ok().and_then(|m| m.modified().ok());
+        if current_mtime.is_some() && current_mtime == last_leases_mtime {
+            continue;
+        }
+        last_leases_mtime = current_mtime;
         if let Some(ip) = lookup_dhcp_lease(&machine.config.name, &patterns, prev_mac_ts, prev_name_ts) {
             assigned_ip = Some(ip);
             break;
@@ -265,16 +294,31 @@ pub async fn run(name: Option<&str>) -> Result<()> {
         }
     };
 
-    // Wait for SSH port to accept connections
+    // Probe TCP port 22 with 100ms backoff before SSH auth loop to avoid spawning failed child processes
     print!("  Waiting for SSH service to become ready...");
     std::io::Write::flush(&mut std::io::stdout())?;
+
+    let mut port_open = false;
+    for _ in 0..600 {
+        if tokio::net::TcpStream::connect((ip, 22)).await.is_ok() {
+            port_open = true;
+            break;
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    if !port_open {
+        let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(child_pid as i32), nix::sys::signal::Signal::SIGTERM);
+        bail!("machine acquired IP {ip}, but port 22 did not open within 60 seconds.");
+    }
+
     let mut ssh_ready = false;
     let base_ssh = crate::ssh::norb_ssh_args();
 
-    for _ in 0..120 {
+    for _ in 0..60 {
         let mut test_args = base_ssh.clone();
         test_args.extend([
-            "-o".to_string(), "ConnectTimeout=1".to_string(),
+            "-o".to_string(), "ConnectTimeout=2".to_string(),
             format!("root@{ip}"),
             "true".to_string(),
         ]);
@@ -302,6 +346,11 @@ pub async fn run(name: Option<&str>) -> Result<()> {
 
     save_machine(&cfg.machines_dir, &machine)?;
 
+    // Install host bridge CLI `mac` inside guest
+    if let Err(e) = crate::bridge::install_guest_mac_cli(ip) {
+        eprintln!("[norb] Notice: failed to install guest mac CLI: {e}");
+    }
+
     println!(
         "\x1b[1;32m✓\x1b[0m Machine \x1b[1m{}\x1b[0m is UP and RUNNING (PID: {}).",
         machine.config.name, child_pid
@@ -313,18 +362,23 @@ pub async fn run(name: Option<&str>) -> Result<()> {
     // Mount and register Apple Rosetta 2 for Linux if available
     let mut rosetta_args = base_ssh.clone();
     rosetta_args.extend([
-        "-o".to_string(), "ConnectTimeout=2".to_string(),
+        "-o".to_string(), "ConnectTimeout=5".to_string(),
         format!("root@{ip}"),
         "mkdir -p /media/rosetta && mount -t virtiofs rosetta /media/rosetta 2>/dev/null; if [ -f /media/rosetta/rosetta ]; then mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null; echo ':rosetta:M::\\x7fELF\\x02\\x01\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x3e\\x00:\\xff\\xff\\xff\\xff\\xff\\xfe\\xfe\\x00\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xfe\\xff\\xff\\xff:/media/rosetta/rosetta:CF' > /proc/sys/fs/binfmt_misc/register 2>/dev/null; echo rosetta_ready; fi".to_string(),
     ]);
-    let rosetta_res = std::process::Command::new("ssh")
-        .args(&rosetta_args)
-        .output();
 
-    if let Ok(out) = rosetta_res {
-        if String::from_utf8_lossy(&out.stdout).contains("rosetta_ready") {
-            println!("  Rosetta 2:   \x1b[1;32mActive\x1b[0m (x86_64 emulation enabled)");
+    for _ in 0..3 {
+        let rosetta_res = std::process::Command::new("ssh")
+            .args(&rosetta_args)
+            .output();
+
+        if let Ok(out) = rosetta_res {
+            if String::from_utf8_lossy(&out.stdout).contains("rosetta_ready") {
+                println!("  Rosetta 2:   \x1b[1;32mActive\x1b[0m (x86_64 emulation enabled)");
+                break;
+            }
         }
+        sleep(Duration::from_millis(500)).await;
     }
 
     // Setup background Docker socket forwarder if Docker is running in this guest
