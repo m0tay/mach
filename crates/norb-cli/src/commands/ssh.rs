@@ -8,7 +8,9 @@ use std::process::Command;
 use super::{find_machine, load_all_machines};
 
 pub async fn sync() -> Result<()> {
-    crate::ssh::sync_ssh_config().await
+    crate::ssh::sync_ssh_config().await?;
+    println!("\x1b[1;32m✓\x1b[0m Synchronized Norb SSH configuration block in ~/.ssh/config");
+    Ok(())
 }
 
 pub async fn run(name: Option<&str>, extra_args: &[String], details_only: bool) -> Result<()> {
@@ -56,15 +58,8 @@ pub async fn run(name: Option<&str>, extra_args: &[String], details_only: bool) 
         return Ok(());
     }
 
-    let mut ssh_args = vec![
-        "-o".to_string(),
-        "StrictHostKeyChecking=no".to_string(),
-        "-o".to_string(),
-        "UserKnownHostsFile=/dev/null".to_string(),
-        "-o".to_string(),
-        "LogLevel=ERROR".to_string(),
-        format!("root@{ip_str}"),
-    ];
+    let mut ssh_args = crate::ssh::norb_ssh_args();
+    ssh_args.push(format!("root@{ip_str}"));
     ssh_args.extend(extra_args.iter().cloned());
 
     let status = Command::new("ssh").args(&ssh_args).status()?;
