@@ -40,7 +40,7 @@ echo -e "${BLUE}======================================================${NC}\n"
 echo -e "${YELLOW}[1/15] Testing version and help output...${NC}"
 VER_OUT=$(mach version)
 assert_contains "$VER_OUT" "mach" "mach version returns valid header"
-assert_contains "$VER_OUT" "0.1.0" "mach version returns semantic version"
+assert_contains "$VER_OUT" "0.2.0" "mach version returns semantic version"
 
 HELP_OUT=$(machctl --help)
 assert_contains "$HELP_OUT" "Linux machines:" "machctl --help lists Linux machines group"

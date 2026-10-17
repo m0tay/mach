@@ -33,7 +33,8 @@ cp "$SCRIPT_DIR/man/man1/machctl.1" "$MAN_DIR/"
 echo -e "\x1b[1;32m✓\x1b[0m Installed and signed mach at $CARGO_BIN_DIR/mach"
 
 # 2. Package Homebrew distribution tarball
-echo -e "\x1b[1;36m➜\x1b[0m Packaging distribution archive for Homebrew..."
+VERSION=$(grep '^version = ' "$SCRIPT_DIR/Cargo.toml" | head -n 1 | cut -d '"' -f 2)
+echo -e "\x1b[1;36m➜\x1b[0m Packaging distribution archive for Homebrew (v$VERSION)..."
 mkdir -p "$SCRIPT_DIR/dist"
 PKG_TMP="/tmp/mach-dist-pkg-$$"
 rm -rf "$PKG_TMP"
@@ -44,7 +45,7 @@ cp "$SCRIPT_DIR/entitlements.plist" "$PKG_TMP/"
 cp -R "$SCRIPT_DIR/assets/"* "$PKG_TMP/assets/"
 cp -R "$SCRIPT_DIR/man/man1/"* "$PKG_TMP/man/man1/"
 
-TAR_FILE="$SCRIPT_DIR/dist/mach-0.1.0-aarch64-apple-darwin.tar.gz"
+TAR_FILE="$SCRIPT_DIR/dist/mach-$VERSION-aarch64-apple-darwin.tar.gz"
 tar -czf "$TAR_FILE" -C "$PKG_TMP" .
 rm -rf "$PKG_TMP"
 
@@ -52,6 +53,7 @@ NEW_SHA=$(shasum -a 256 "$TAR_FILE" | awk '{print $1}')
 echo -e "  \x1b[1;34mArchive SHA256:\x1b[0m $NEW_SHA"
 
 # 3. Update Formula/mach.rb in repo
+sed -i '' -E "s|url \"file://.*/dist/mach-.*-aarch64-apple-darwin.tar.gz\"|url \"file://$SCRIPT_DIR/dist/mach-$VERSION-aarch64-apple-darwin.tar.gz\"|" "$SCRIPT_DIR/Formula/mach.rb"
 sed -i '' "s/sha256 \".*\"/sha256 \"$NEW_SHA\"/" "$SCRIPT_DIR/Formula/mach.rb"
 
 # 4. Update tapped formula if present

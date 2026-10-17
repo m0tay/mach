@@ -440,6 +440,10 @@ mod imp {
         // Separator
         add_separator(menu);
 
+        // Discrete version display (non-clickable)
+        let version_label = format!("mach v{}", env!("CARGO_PKG_VERSION"));
+        add_menu_item(menu, &version_label, None, None, false);
+
         // Quit Mach
         let quit_sel = sel_registerName(b"onQuit:\0".as_ptr() as _);
         add_menu_item(menu, "Quit Mach", Some(quit_sel), Some(target), true);
@@ -740,10 +744,11 @@ end tell"#,
                 } else {
                     msg_send_1(button, sel_registerName(b"setTitle:\0".as_ptr() as _), ns_string("⚡️"));
                 }
+                let tip = format!("mach v{} (Virtualization & Containers)", env!("CARGO_PKG_VERSION"));
                 msg_send_1(
                     button,
                     sel_registerName(b"setToolTip:\0".as_ptr() as _),
-                    ns_string("mach Virtualization & Containers"),
+                    ns_string(&tip),
                 );
             } else {
                 msg_send_1(

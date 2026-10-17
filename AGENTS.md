@@ -141,6 +141,14 @@ Commands must live in **ONE place and one place only**. Never duplicate commands
 - **If a control plane command is invoked via `mach`** (e.g. `mach inspect` or `mach dump`):
   - `mach` must NOT execute it. It must print a clear, polite error redirecting the user to `machctl <command>`.
 
+### Rule 6: Strictly Follow SemVer & Display Version Discretely
+- Every patch/change must increment the minor version (e.g. `0.1.0` -> `0.2.0` -> `0.3.0`).
+- The delivered binary must display the version:
+  - In CLI: `mach --version`, `machctl --version`, `mach version`, and in `machctl doctor`.
+  - In macOS menu bar: Discretely displayed as tooltip `mach v<VERSION>` on hover, and as a disabled non-clickable menu item `mach v<VERSION>` directly above `Quit Mach` in the dropdown.
+- Keep `Cargo.toml`, `Formula/mach.rb`, manpages (`mach.1`, `machctl.1`), and tests in sync.
+- Automate distribution archive packaging and Homebrew tap synchronization via `./install.sh`.
+
 ---
 
 ## 5. Key Technical Invariants & Gotchas
