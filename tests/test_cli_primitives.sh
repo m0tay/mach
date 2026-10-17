@@ -110,8 +110,8 @@ assert_contains "$DUMP_YAML" "name: test-alp" "machctl dump outputs YAML by defa
 DUMP_JSON=$(machctl dump test-alp --json)
 assert_contains "$DUMP_JSON" '"name": "test-alp"' "machctl dump --json outputs valid JSON"
 
-MACH_INSPECT=$(mach inspect test-alp)
-assert_contains "$MACH_INSPECT" "name: test-alp" "mach inspect works directly"
+MACH_INSPECT_ERR=$(mach inspect test-alp 2>&1 || true)
+assert_contains "$MACH_INSPECT_ERR" "In mach, 'machctl' manages the macOS virtualization control plane" "mach inspect redirects to machctl"
 
 DEF_OUT=$(mach default test-alp)
 assert_contains "$DEF_OUT" "test-alp" "mach default sets default machine"

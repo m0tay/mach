@@ -1,4 +1,4 @@
-//! `machctl inspect` and `mach inspect` command implementation.
+//! `machctl inspect` command implementation.
 //!
 //! Outputs detailed machine metadata, hypervisor runtime status, hardware specs,
 //! network configuration, features, and storage paths.

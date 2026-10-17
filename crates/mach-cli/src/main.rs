@@ -50,12 +50,14 @@ fn print_mach_help() {
      mach menu
 
 For the full system control plane, Kubernetes, Docker, activity monitor, and diagnostics, use "machctl":
-  machctl top         # Live APFS & system monitor
-  machctl info <name> # Detailed machine info
-  machctl ssh <name>  # Display SSH connection details
-  machctl k8s         # Manage local Kubernetes cluster
-  machctl doctor      # System diagnostics
-  machctl --help      # All control plane commands"#);
+  machctl top            # Live APFS & system monitor
+  machctl info <name>    # Detailed machine info
+  machctl inspect <name> # Deep inspection of machine specs (YAML/JSON)
+  machctl dump <name>    # Dump configuration (YAML/JSON)
+  machctl ssh <name>     # Display SSH connection details
+  machctl k8s            # Manage local Kubernetes cluster
+  machctl doctor         # System diagnostics
+  machctl --help         # All control plane commands"#);
 }
 
 fn print_machctl_help() {
@@ -274,14 +276,23 @@ async fn main() -> Result<()> {
                 }
             }
 
+            // In mach, control plane administrative commands belong exclusively to machctl.
+            // If invoked via mach, provide clean guidance pointing to machctl.
+            if first_arg == "inspect" || first_arg == "dump" {
+                eprintln!(
+                    "In mach, 'machctl' manages the macOS virtualization control plane.\nUse: machctl {} <machine>\n'mach' is reserved for Linux shell and command execution (e.g. 'mach uname -a').\n",
+                    first_arg
+                );
+                anyhow::bail!("'{first_arg}' is a control plane command. Run 'machctl {first_arg}' instead.");
+            }
+
             // In `mach`, only basic machine verbs are intercepted locally;
-            // everything else (info, top, logs, ps, uname, apt...) transparently runs in Linux!
+            // everything else (inspect, dump, top, ps, uname, apt...) transparently runs in Linux!
             let mach_machine_commands = [
                 "start", "stop", "restart", "shell", "create", "delete", "list", "ls",
                 "default", "init", "help", "--help", "-h", "version", "--version", "-V",
                 "menu", "run", "setup", "completion", "boot", "run-vm", "update",
                 "info", "status", "logs", "ssh", "push", "pull",
-                "inspect", "dump",
             ];
 
             let cmd_name = &raw_args[idx];

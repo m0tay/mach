@@ -1,4 +1,4 @@
-//! `machctl dump` and `mach dump` command implementation.
+//! `machctl dump` command implementation.
 //!
 //! Dumps raw machine or system configuration objects for scripting, backups, and pipelines.
 //! Output is formatted as YAML by default, with `--json` support.
