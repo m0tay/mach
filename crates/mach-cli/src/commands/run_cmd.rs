@@ -1,7 +1,7 @@
-//! `norb run` command implementation (transparent command runner inside VM).
+//! `mach run` command implementation (transparent command runner inside VM).
 
-use anyhow::{bail, Context, Result};
-use mach_common::config::NorbConfig;
+use anyhow::{Context, Result};
+use mach_common::config::MachConfig;
 use mach_common::machine::MachineState;
 use std::os::unix::process::ExitStatusExt;
 
@@ -14,10 +14,10 @@ pub async fn run(
     command: &[String],
 ) -> Result<()> {
     if command.is_empty() {
-        bail!("no command specified to run");
+        return super::shell::run(machine_opt, system, &[]).await;
     }
 
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
     let mut effective_cmd = command;
 
     let target_name_opt = match machine_opt {
@@ -33,15 +33,15 @@ pub async fn run(
     };
 
     if effective_cmd.is_empty() {
-        bail!("no command specified to run");
+        return super::shell::run(target_name_opt, system, &[]).await;
     }
 
     let mut machine = super::resolve_target_machine_ext(&cfg, target_name_opt, system)?;
 
-    // Auto-start if stopped
+    // Auto-start if stopped: send all progress to stderr for clean stdout composability
     if machine.state != MachineState::Running {
-        println!("\x1b[1;36m➜\x1b[0m Starting machine \x1b[1m{}\x1b[0m...", machine.config.name);
-        super::start::run(Some(&machine.config.name)).await?;
+        eprintln!("\x1b[1;36m➜\x1b[0m Starting machine \x1b[1m{}\x1b[0m...", machine.config.name);
+        super::start::run_ext(Some(&machine.config.name), true).await?;
         machine = find_machine(&cfg.machines_dir, &machine.config.name)?
             .with_context(|| format!("machine '{}' not found after start", machine.config.name))?;
     }

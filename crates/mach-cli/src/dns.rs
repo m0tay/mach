@@ -111,7 +111,7 @@ pub fn resolve_machine_ip(machines_dir: &Path, prefix: &str) -> Ipv4Addr {
     lookup_machine_ip(machines_dir, prefix).unwrap_or(Ipv4Addr::new(127, 0, 0, 1))
 }
 
-/// Encode a domain name into DNS wire format (e.g. "gateway.norb.local" -> "\x07gateway\x04norb\x05local\x00").
+/// Encode a domain name into DNS wire format (e.g. "gateway.mach.local" -> "\x07gateway\x04mach\x05local\x00").
 pub fn encode_dns_name(name: &str) -> Vec<u8> {
     let mut bytes = Vec::new();
     for part in name.split('.') {
@@ -525,7 +525,7 @@ mod tests {
     #[test]
     fn test_dns_cache_resolution() {
         let _lock = TEST_MUTEX.lock().unwrap();
-        let temp_dir = std::env::temp_dir().join("norb_dns_test_cache");
+        let temp_dir = std::env::temp_dir().join("mach_dns_test_cache");
         let _ = std::fs::create_dir_all(&temp_dir);
 
         {

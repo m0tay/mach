@@ -235,7 +235,7 @@ async fn handle_proxy_conn(mut client: TcpStream, docker_sock: &Path, machines_d
     let guest_ip = match guest_ip {
         Some(ip) => ip,
         None => {
-            send_html_error(&mut client, 503, "No active Norb virtual machine found.").await?;
+            send_html_error(&mut client, 503, "No active mach virtual machine found.").await?;
             return Ok(());
         }
     };
@@ -302,7 +302,7 @@ pub fn parse_host_header(headers: &str) -> Option<String> {
 }
 
 /// Extract clean domain and optional '@<port>' override from host string.
-/// Handles forms like 'http://app.norb.local@8080', 'app.norb.local@8080', and 'app.norb.local:8080'.
+/// Handles forms like 'http://app.mach.local@8080', 'app.mach.local@8080', and 'app.mach.local:8080'.
 pub fn parse_host_and_override_port(host: &str) -> (String, Option<u16>) {
     let mut h = host.trim();
     if let Some(stripped) = h.strip_prefix("http://").or_else(|| h.strip_prefix("https://")) {
@@ -353,8 +353,8 @@ pub fn find_target_route<'a>(domain: &str, routes: &'a [RouteTarget]) -> Option<
         }
 
         // Docker Compose multi-level domain routing:
-        // 1. <service>.<project>.norb.local (clean_host == <service>.<project>)
-        // 2. <project>-<service>.norb.local (clean_host == <project>-<service>)
+        // 1. <service>.<project>.mach.local (clean_host == <service>.<project>)
+        // 2. <project>-<service>.mach.local (clean_host == <project>-<service>)
         if let (Some(svc), Some(proj)) = (&r.compose_service, &r.compose_project) {
             let pattern1 = format!("{}.{}", svc, proj);
             let pattern2 = format!("{}-{}", proj, svc);
@@ -373,7 +373,7 @@ pub fn find_target_route<'a>(domain: &str, routes: &'a [RouteTarget]) -> Option<
 }
 
 /// Synchronously look up target container port from Host header.
-/// Supports '@<port>' override syntax (e.g. `http://app.norb.local@8080`), routing directly to it.
+/// Supports '@<port>' override syntax (e.g. `http://app.mach.local@8080`), routing directly to it.
 pub fn find_target_port(host: &str, routes: &[RouteTarget]) -> Option<u16> {
     let (domain, override_port) = parse_host_and_override_port(host);
 
@@ -605,7 +605,7 @@ async fn send_html_error(stream: &mut TcpStream, status: u16, msg: &str) -> Resu
     let body = format!(
         r#"<!DOCTYPE html>
 <html>
-<head><title>Norb Proxy Error</title>
+<head><title>mach Proxy Error</title>
 <style>
 body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }}
 .card {{ background: #1e293b; padding: 2rem; border-radius: 12px; border: 1px solid #334155; max-width: 500px; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }}
@@ -615,7 +615,7 @@ p {{ color: #94a3b8; line-height: 1.5; }}
 </head>
 <body>
 <div class="card">
-  <h1>Norb Gateway: {}</h1>
+  <h1>mach Gateway: {}</h1>
   <p>{}</p>
 </div>
 </body>
@@ -647,17 +647,17 @@ mod tests {
 
     #[test]
     fn test_parse_host_header() {
-        let headers = "GET / HTTP/1.1\r\nHost: myapp.norb.local:8080\r\nUser-Agent: curl\r\n\r\n";
-        assert_eq!(parse_host_header(headers), Some("myapp.norb.local".to_string()));
+        let headers = "GET / HTTP/1.1\r\nHost: myapp.mach.local:8080\r\nUser-Agent: curl\r\n\r\n";
+        assert_eq!(parse_host_header(headers), Some("myapp.mach.local".to_string()));
 
         let headers_lowercase = "get / http/1.1\r\nhost: backend.local\r\n\r\n";
         assert_eq!(parse_host_header(headers_lowercase), Some("backend.local".to_string()));
 
-        let headers_override = "GET / HTTP/1.1\r\nHost: app.norb.local@8080\r\n\r\n";
-        assert_eq!(parse_host_header(headers_override), Some("app.norb.local@8080".to_string()));
+        let headers_override = "GET / HTTP/1.1\r\nHost: app.mach.local@8080\r\n\r\n";
+        assert_eq!(parse_host_header(headers_override), Some("app.mach.local@8080".to_string()));
 
-        let headers_url = "GET / HTTP/1.1\r\nHost: http://app.norb.local@8080\r\n\r\n";
-        assert_eq!(parse_host_header(headers_url), Some("app.norb.local@8080".to_string()));
+        let headers_url = "GET / HTTP/1.1\r\nHost: http://app.mach.local@8080\r\n\r\n";
+        assert_eq!(parse_host_header(headers_url), Some("app.mach.local@8080".to_string()));
 
         let no_host = "GET / HTTP/1.1\r\nUser-Agent: curl\r\n\r\n";
         assert_eq!(parse_host_header(no_host), None);
@@ -772,14 +772,14 @@ mod tests {
         }];
 
         // Auto-detection probe chooses open_port
-        let resolved = resolve_target_port("web.myapp.norb.local", &routes, ip).await;
+        let resolved = resolve_target_port("web.myapp.mach.local", &routes, ip).await;
         assert_eq!(resolved, Some(open_port));
 
-        let resolved_kebab = resolve_target_port("myapp-web.norb.local", &routes, ip).await;
+        let resolved_kebab = resolve_target_port("myapp-web.mach.local", &routes, ip).await;
         assert_eq!(resolved_kebab, Some(open_port));
 
         // Port override skips probe and routes directly
-        let overridden = resolve_target_port("web.myapp.norb.local@8081", &routes, ip).await;
+        let overridden = resolve_target_port("web.myapp.mach.local@8081", &routes, ip).await;
         assert_eq!(overridden, Some(8081));
     }
 }

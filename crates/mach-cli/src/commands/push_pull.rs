@@ -1,13 +1,13 @@
-//! `norb push` and `norb pull` commands (bidirectional file copy).
+//! `mach push` and `mach pull` commands (bidirectional file copy).
 
 use anyhow::{bail, Context, Result};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use mach_common::machine::MachineState;
 use std::process::Command;
 
 use super::{find_machine, load_all_machines};
 
-fn resolve_ip(cfg: &NorbConfig, machine_opt: Option<&str>) -> Result<String> {
+fn resolve_ip(cfg: &MachConfig, machine_opt: Option<&str>) -> Result<String> {
     let target_name = match machine_opt {
         Some(n) => n.to_string(),
         None => {
@@ -20,7 +20,7 @@ fn resolve_ip(cfg: &NorbConfig, machine_opt: Option<&str>) -> Result<String> {
                     .filter(|m| m.state == MachineState::Running)
                     .collect();
                 if running.is_empty() {
-                    bail!("no running machines found. Run `norb start <machine>` first.");
+                    bail!("no running machines found. Run `mach start <machine>` first.");
                 }
                 running[0].config.name.clone()
             }
@@ -47,7 +47,7 @@ fn shell_quote(s: &str) -> String {
 }
 
 pub async fn push(machine_opt: Option<&str>, src: &str, dest: &str) -> Result<()> {
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
     let ip = resolve_ip(&cfg, machine_opt)?;
     let src_path = std::path::Path::new(src);
 
@@ -63,7 +63,7 @@ pub async fn push(machine_opt: Option<&str>, src: &str, dest: &str) -> Result<()
         let file = std::fs::File::open(src_path)?;
         let remote_cmd = format!("mkdir -p \"$(dirname -- {q_dest})\" && cat > {q_dest}");
         let mut ssh_cmd = Command::new("ssh");
-        ssh_cmd.args(crate::ssh::norb_ssh_args());
+        ssh_cmd.args(crate::ssh::mach_ssh_args());
         ssh_cmd.arg(format!("root@{ip}"));
         ssh_cmd.arg(&remote_cmd);
         ssh_cmd.stdin(file);
@@ -87,7 +87,7 @@ pub async fn push(machine_opt: Option<&str>, src: &str, dest: &str) -> Result<()
         let tar_out = tar_proc.stdout.take().unwrap();
 
         let mut ssh_cmd = Command::new("ssh");
-        ssh_cmd.args(crate::ssh::norb_ssh_args());
+        ssh_cmd.args(crate::ssh::mach_ssh_args());
         ssh_cmd.arg(format!("root@{ip}"));
         ssh_cmd.arg(&tar_cmd);
         ssh_cmd.stdin(tar_out);
@@ -104,7 +104,7 @@ pub async fn push(machine_opt: Option<&str>, src: &str, dest: &str) -> Result<()
 }
 
 pub async fn pull(machine_opt: Option<&str>, src: &str, dest: &str) -> Result<()> {
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
     let ip = resolve_ip(&cfg, machine_opt)?;
     let dest_path = std::path::Path::new(dest);
 
@@ -114,7 +114,7 @@ pub async fn pull(machine_opt: Option<&str>, src: &str, dest: &str) -> Result<()
     let test_cmd = format!("test -d {q_src}");
     let mut check_cmd = Command::new("ssh");
     check_cmd.arg("-n");
-    check_cmd.args(crate::ssh::norb_ssh_args());
+    check_cmd.args(crate::ssh::mach_ssh_args());
     check_cmd.arg(format!("root@{ip}"));
     check_cmd.arg(&test_cmd);
     let check_is_dir = check_cmd.status()?;
@@ -125,7 +125,7 @@ pub async fn pull(machine_opt: Option<&str>, src: &str, dest: &str) -> Result<()
         let remote_tar = format!("tar -czf - -C {q_src} .");
         let mut ssh_cmd = Command::new("ssh");
         ssh_cmd.arg("-n");
-        ssh_cmd.args(crate::ssh::norb_ssh_args());
+        ssh_cmd.args(crate::ssh::mach_ssh_args());
         ssh_cmd.arg(format!("root@{ip}"));
         ssh_cmd.arg(&remote_tar);
         ssh_cmd.stdout(std::process::Stdio::piped());
@@ -150,7 +150,7 @@ pub async fn pull(machine_opt: Option<&str>, src: &str, dest: &str) -> Result<()
         let cat_cmd = format!("cat -- {q_src}");
         let mut ssh_cmd = Command::new("ssh");
         ssh_cmd.arg("-n");
-        ssh_cmd.args(crate::ssh::norb_ssh_args());
+        ssh_cmd.args(crate::ssh::mach_ssh_args());
         ssh_cmd.arg(format!("root@{ip}"));
         ssh_cmd.arg(&cat_cmd);
         ssh_cmd.stdout(out_file);

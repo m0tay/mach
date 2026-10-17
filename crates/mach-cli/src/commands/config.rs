@@ -1,17 +1,17 @@
-//! `norb config` command implementation.
+//! `mach config` command implementation.
 
 use anyhow::Result;
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 
 pub async fn show() -> Result<()> {
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
     let json = serde_json::to_string_pretty(&cfg)?;
     println!("{}", json);
     Ok(())
 }
 
 pub async fn set(key: &str, value: &str) -> Result<()> {
-    let mut cfg = NorbConfig::load()?;
+    let mut cfg = MachConfig::load()?;
 
     match key {
         "default_cpus" => {

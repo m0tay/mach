@@ -19,11 +19,11 @@ pub mod ssh;
 pub mod tls;
 
 use cli::{Cli, Commands, ConfigAction, DaemonAction, DnsAction, DockerAction, K8sAction, TlsAction};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use mach_common::machine::MachineState;
 
 fn print_mach_help() {
-    println!(r#"Mach's short "mach" daily-driver command:
+    println!(r#"mach's short "mach" daily-driver command:
 
 1. Interactive Linux Shell
    Run "mach" with no arguments to drop into your default Linux machine:
@@ -59,9 +59,9 @@ For the full system control plane, Kubernetes, Docker, activity monitor, and dia
 }
 
 fn print_machctl_help() {
-    println!(r#"Mach Control Plane (machctl) — System administration and management.
+    println!(r#"mach control plane (machctl) — System administration and management.
 
-Use "machctl" for configuring, monitoring, and managing your Mach virtualization environment.
+Use "machctl" for configuring, monitoring, and managing your mach virtualization environment.
 For daily Linux shell and transparent command execution, use "mach".
 
 Usage:
@@ -70,8 +70,8 @@ Usage:
 Linux machines:
   create      Create a new Linux machine
   list        List all machines (alias: ls)
-  start       Start Mach or a machine
-  stop        Stop Mach or a machine
+  start       Start mach or a machine
+  stop        Stop mach or a machine
   restart     Restart a machine
   delete      Delete a machine
   info        Get detailed info about a machine
@@ -94,15 +94,15 @@ Containers:
 
 System & Infrastructure:
   top         Live activity and resource monitor (CPU, Memory, APFS CoW disk)
-  status      Check whether Mach and machines are running
+  status      Check whether mach and machines are running
   doctor      Verify hypervisor entitlements, network, and system health
-  config      View or modify Mach configuration (~/.mach/config.yaml)
+  config      View or modify mach configuration (~/.mach/config.yaml)
   daemon      Manage background DNS (*.mach.local) and port forwarder
   dns         Configure macOS native DNS resolver
   tls         Manage local wildcard TLS certificates (*.mach.local)
-  menu        Launch native macOS menu bar status item ( Mach)
+  menu        Launch native macOS menu bar status item ( mach)
   setup       Run initial onboarding and environment setup
-  version     Show Mach version
+  version     Show mach version
 
 Flags:
   -h, --help      help for machctl
@@ -118,7 +118,7 @@ async fn main() -> Result<()> {
         .and_then(|f| f.to_str())
         .unwrap_or("mach");
 
-    let is_ctl = bin_name == "machctl" || bin_name == "norbctl";
+    let is_ctl = bin_name == "machctl";
 
     // Case 1: Zero arguments
     if raw_args.len() == 1 {
@@ -128,13 +128,13 @@ async fn main() -> Result<()> {
         }
 
         // Smart 'mach' zero-args behavior:
-        let cfg = NorbConfig::load()?;
+        let cfg = MachConfig::load()?;
 
         let machines = commands::load_all_machines(&cfg.machines_dir)?;
         let user_machines: Vec<_> = machines.iter().filter(|m| !m.is_system()).collect();
 
         if user_machines.is_empty() {
-            println!("No user machines found. Welcome to Mach! Starting initial environment setup...\n");
+            println!("No user machines found. Welcome to mach! Starting initial environment setup...\n");
             commands::setup::run(true).await?;
             return Ok(());
         }
@@ -177,7 +177,6 @@ async fn main() -> Result<()> {
 
     // Case 2: Subcommand routing
     let mut effective_args = raw_args.clone();
-    let first_arg = &raw_args[1];
 
     if !is_ctl {
         // In `mach`, only basic machine verbs are intercepted locally;
@@ -190,15 +189,17 @@ async fn main() -> Result<()> {
             "mount", "code", "k8s", "link", "tls",
         ];
 
-        if !mach_machine_commands.contains(&first_arg.as_str())
-            && first_arg != "-v"
-            && first_arg != "--verbose"
-            && !first_arg.starts_with("-m")
-            && !first_arg.starts_with("--machine")
-            && !first_arg.starts_with("-u")
-            && !first_arg.starts_with("--user")
-        {
-            effective_args.insert(1, "run".to_string());
+        let first_cmd_idx = raw_args
+            .iter()
+            .skip(1)
+            .position(|arg| arg != "-v" && arg != "--verbose")
+            .map(|i| i + 1);
+
+        if let Some(idx) = first_cmd_idx {
+            let cmd_name = &raw_args[idx];
+            if !mach_machine_commands.contains(&cmd_name.as_str()) {
+                effective_args.insert(idx, "run".to_string());
+            }
         }
     } else {
         // In `machctl`, all control plane commands are recognized
@@ -211,11 +212,17 @@ async fn main() -> Result<()> {
             "--help", "-h", "--version", "-V",
         ];
 
-        if !machctl_commands.contains(&first_arg.as_str())
-            && first_arg != "-v"
-            && first_arg != "--verbose"
-        {
-            effective_args.insert(1, "run".to_string());
+        let first_cmd_idx = raw_args
+            .iter()
+            .skip(1)
+            .position(|arg| arg != "-v" && arg != "--verbose")
+            .map(|i| i + 1);
+
+        if let Some(idx) = first_cmd_idx {
+            let cmd_name = &raw_args[idx];
+            if !machctl_commands.contains(&cmd_name.as_str()) {
+                effective_args.insert(idx, "run".to_string());
+            }
         }
     }
 
@@ -287,7 +294,7 @@ async fn main() -> Result<()> {
             if sync {
                 commands::ssh::sync().await?;
             } else {
-                let show_details = details || bin_name == "norbctl";
+                let show_details = details;
                 commands::ssh::run(name.as_deref(), &args, show_details).await?;
             }
         }

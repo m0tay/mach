@@ -100,7 +100,7 @@ async fn wait_for_ssh_ready(ip: &std::net::IpAddr) -> Result<()> {
 pub async fn enable() -> Result<()> {
     let cfg = MachConfig::load()?;
 
-    println!("\x1b[1;36m➜\x1b[0m Checking Mach Kubernetes cluster...");
+    println!("\x1b[1;36m➜\x1b[0m Checking mach Kubernetes cluster...");
 
     let vm_name = resolve_k8s_machine_name(&cfg.machines_dir)?;
     let machine = find_machine(&cfg.machines_dir, &vm_name)?;
@@ -233,10 +233,6 @@ pub async fn enable() -> Result<()> {
 
     let mach_kubeconfig = kube_dir.join("config.mach");
     fs::write(&mach_kubeconfig, &patched_yaml)?;
-
-    // Also write config.norb for backward compatibility
-    let norb_kubeconfig = kube_dir.join("config.norb");
-    let _ = fs::write(&norb_kubeconfig, &patched_yaml);
 
     // Set or merge into ~/.kube/config safely, NEVER overwriting user's active context without permission
     let main_config = kube_dir.join("config");
@@ -392,7 +388,6 @@ pub async fn status() -> Result<()> {
 
             let home = dirs::home_dir().unwrap_or_default();
             let conf = home.join(".kube").join("config.mach");
-            let conf = if conf.exists() { conf } else { home.join(".kube").join("config.norb") };
             if conf.exists() {
                 println!("  Kubeconfig:  {}", conf.display());
                 let _ = Command::new("kubectl")

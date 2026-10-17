@@ -63,7 +63,7 @@ fn check_apfs_cow_capability(target_dir: &std::path::Path) -> bool {
 }
 
 pub async fn run() -> Result<()> {
-    println!("\x1b[1mMach Doctor — System Health Check\x1b[0m");
+    println!("\x1b[1mmach doctor — System Health Check\x1b[0m");
     println!("───────────────────────────────────────────────────");
 
     let mut all_ok = true;
@@ -182,7 +182,7 @@ pub async fn run() -> Result<()> {
     let context_out = Command::new("docker").args(["context", "ls"]).output();
     if let Ok(out) = context_out {
         let stdout = String::from_utf8_lossy(&out.stdout);
-        if stdout.contains("mach") || stdout.contains("norb") {
+        if stdout.contains("mach") {
             println!("  \x1b[1;32m✓\x1b[0m Docker Context:      'mach' context configured in Docker CLI");
         } else {
             println!("  \x1b[1;33m!\x1b[0m Docker Context:      'mach' context not configured (run `mach docker setup`)");
@@ -232,7 +232,7 @@ pub async fn run() -> Result<()> {
 
     println!("───────────────────────────────────────────────────");
     if all_ok {
-        println!("\x1b[1;32m✓ All system checks passed! Mach is ready for supersonic performance.\x1b[0m\n");
+        println!("\x1b[1;32m✓ All system checks passed! mach is ready for supersonic performance.\x1b[0m\n");
     } else {
         println!("\x1b[1;33m! Some checks reported warnings or recommendations.\x1b[0m\n");
     }

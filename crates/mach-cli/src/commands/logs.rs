@@ -1,7 +1,7 @@
-//! `norb logs` command implementation.
+//! `mach logs` command implementation.
 
 use anyhow::{bail, Context, Result};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::time::Duration;
@@ -53,7 +53,7 @@ pub fn find_start_offset<R: Read + Seek>(reader: &mut R, lines: usize) -> std::i
 }
 
 pub async fn run(name: Option<&str>, follow: bool, lines: usize) -> Result<()> {
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
     let target_name = match name {
         Some(n) => n.to_string(),
         None => {

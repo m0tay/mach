@@ -1,7 +1,7 @@
-//! Host binary link implementation for Norb.
+//! Host binary link implementation for mach.
 
 use anyhow::{bail, Context, Result};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use mach_common::machine::MachineState;
 use std::process::Command;
 
@@ -31,7 +31,7 @@ pub async fn run(binary: &str, machine_opt: Option<&str>) -> Result<()> {
     }
 
     // 2. Resolve target machine
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
     let mut machine = super::resolve_target_machine(&cfg, machine_opt)?;
 
     // Auto-start machine if stopped
@@ -73,7 +73,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_link_rejects_nonexistent_binary() {
-        let res = run("norb_test_nonexistent_bin_12345", None).await;
+        let res = run("mach_test_nonexistent_bin_12345", None).await;
         assert!(res.is_err());
         assert!(res.unwrap_err().to_string().contains("not found on macOS host"));
     }

@@ -1,7 +1,7 @@
-//! Export and import Norb machines.
+//! Export and import mach machines.
 
 use anyhow::{bail, Context, Result};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use mach_common::machine::{Architecture, Machine, MachineConfig, MachineState};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::commands::{find_machine, save_machine};
 
 pub async fn export(name: &str, out_file: &Path) -> Result<()> {
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
     let machine = match find_machine(&cfg.machines_dir, name)? {
         Some(m) => m,
         None => bail!("Machine '{}' does not exist.", name),
@@ -36,8 +36,8 @@ pub async fn export(name: &str, out_file: &Path) -> Result<()> {
             .with_context(|| format!("failed to copy disk to {}", out_file.display()))?;
     }
 
-    // Write sidecar <path>.norb-meta with JSON machine config
-    let sidecar_path = PathBuf::from(format!("{}.norb-meta", out_file.display()));
+    // Write sidecar <path>.mach-meta with JSON machine config
+    let sidecar_path = PathBuf::from(format!("{}.mach-meta", out_file.display()));
     let meta_json = serde_json::to_string_pretty(&machine.config)?;
     let _ = fs::write(&sidecar_path, meta_json);
 
@@ -46,7 +46,7 @@ pub async fn export(name: &str, out_file: &Path) -> Result<()> {
 }
 
 pub async fn import(in_file: &Path, name: &str) -> Result<()> {
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
     if find_machine(&cfg.machines_dir, name)?.is_some() {
         bail!("Machine '{}' already exists.", name);
     }
@@ -70,14 +70,24 @@ pub async fn import(in_file: &Path, name: &str) -> Result<()> {
     }
 
     // Restore original vCPU, RAM, distro settings from sidecar if present
-    let sidecar_path = PathBuf::from(format!("{}.norb-meta", in_file.display()));
-    let alt_sidecar_path = in_file.with_extension("norb-meta");
+    let sidecar_path = PathBuf::from(format!("{}.mach-meta", in_file.display()));
+    let alt_sidecar_path = in_file.with_extension("mach-meta");
+    let legacy_sidecar_path = PathBuf::from(format!("{}.norb-meta", in_file.display()));
+    let legacy_alt_sidecar_path = in_file.with_extension("norb-meta");
     let maybe_config: Option<MachineConfig> = if sidecar_path.exists() {
         fs::read_to_string(&sidecar_path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
     } else if alt_sidecar_path.exists() {
         fs::read_to_string(&alt_sidecar_path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+    } else if legacy_sidecar_path.exists() {
+        fs::read_to_string(&legacy_sidecar_path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+    } else if legacy_alt_sidecar_path.exists() {
+        fs::read_to_string(&legacy_alt_sidecar_path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
     } else {
@@ -119,6 +129,6 @@ pub async fn import(in_file: &Path, name: &str) -> Result<()> {
     }
 
     println!("\x1b[1;32m✓\x1b[0m Imported machine \x1b[1m{}\x1b[0m successfully.", name);
-    println!("Run \x1b[1;34mnorb start {}\x1b[0m to launch it.", name);
+    println!("Run \x1b[1;34mmach start {}\x1b[0m to launch it.", name);
     Ok(())
 }

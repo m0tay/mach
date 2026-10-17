@@ -123,9 +123,8 @@ pub async fn setup(system: bool) -> Result<()> {
     crate::commands::daemon::ensure_daemon_running();
 
     // 5. Configure Docker context
-    println!("\x1b[1;36m➜\x1b[0m Configuring Docker CLI context for Mach...");
+    println!("\x1b[1;36m➜\x1b[0m Configuring Docker CLI context for mach...");
     let _ = Command::new("docker").args(["context", "rm", "-f", "mach"]).output();
-    let _ = Command::new("docker").args(["context", "rm", "-f", "norb"]).output();
 
     let output = Command::new("docker")
         .args([
@@ -135,21 +134,9 @@ pub async fn setup(system: bool) -> Result<()> {
             "--docker",
             &format!("host=unix://{}", sock_path.display()),
             "--description",
-            "Mach Docker Engine (Apple Silicon)",
+            "mach Docker Engine (Apple Silicon)",
         ])
         .output()?;
-
-    let _ = Command::new("docker")
-        .args([
-            "context",
-            "create",
-            "norb",
-            "--docker",
-            &format!("host=unix://{}", sock_path.display()),
-            "--description",
-            "Mach (legacy norb alias)",
-        ])
-        .output();
 
     if output.status.success() {
         let _ = Command::new("docker").args(["context", "use", "mach"]).output();

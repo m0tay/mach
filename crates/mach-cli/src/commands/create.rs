@@ -1,7 +1,7 @@
-//! `norb create` command implementation.
+//! `mach create` command implementation.
 
 use anyhow::{bail, Result};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use mach_common::machine::{Architecture, Machine, MachineConfig, MachineState};
 use std::collections::HashSet;
 
@@ -30,7 +30,7 @@ pub async fn run_with_isolated(
     arch_str: &str,
     isolated: bool,
 ) -> Result<()> {
-    let mut cfg = NorbConfig::load()?;
+    let mut cfg = MachConfig::load()?;
 
     let mut existing_names = HashSet::new();
     if cfg.machines_dir.exists() {
@@ -101,7 +101,6 @@ pub async fn run_with_isolated(
 
     let is_sys = machine_name == "mach-docker"
         || machine_name == "mach-k8s"
-        || machine_name == "norb-k8s"
         || machine_name == "mach-kubernetes";
 
     let machine_cfg = MachineConfig {
@@ -164,7 +163,7 @@ pub async fn run_with_isolated(
         machine_name,
         machine.short_id()
     );
-    println!("\nRun \x1b[1;34mnorb start {}\x1b[0m to boot the machine.", machine_name);
+    println!("\nRun \x1b[1;34mmach start {}\x1b[0m to boot the machine.", machine_name);
 
     Ok(())
 }

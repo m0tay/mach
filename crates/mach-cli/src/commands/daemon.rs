@@ -1,9 +1,9 @@
-//! Background daemon manager for Norb DNS and dynamic port forwarding.
+//! Background daemon manager for mach DNS and dynamic port forwarding.
 
 use anyhow::{Context, Result};
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use std::fs;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
@@ -13,7 +13,7 @@ use crate::dns;
 use crate::port_forward;
 
 pub async fn run_foreground() -> Result<()> {
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
     let run_dir = cfg.data_dir.join("run");
     fs::create_dir_all(&run_dir)?;
 
@@ -98,14 +98,14 @@ pub fn is_daemon_running(run_dir: &Path) -> Option<u32> {
 }
 
 pub fn start_daemon() -> Result<()> {
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
     let run_dir = cfg.data_dir.join("run");
     let log_dir = cfg.data_dir.join("logs");
     fs::create_dir_all(&run_dir)?;
     fs::create_dir_all(&log_dir)?;
 
     if let Some(pid) = is_daemon_running(&run_dir) {
-        println!("\x1b[1;32m✓\x1b[0m Norb daemon is already running (PID: {}).", pid);
+        println!("\x1b[1;32m✓\x1b[0m mach daemon is already running (PID: {}).", pid);
         return Ok(());
     }
 
@@ -127,7 +127,7 @@ pub fn start_daemon() -> Result<()> {
     let pid = child.id();
     fs::write(run_dir.join("daemon.pid"), pid.to_string())?;
 
-    println!("\x1b[1;32m✓\x1b[0m Started Mach background daemon (PID: {}).", pid);
+    println!("\x1b[1;32m✓\x1b[0m Started mach background daemon (PID: {}).", pid);
     println!("  DNS Server:    \x1b[1;34m127.0.0.1:5354\x1b[0m (*.mach.local)");
     println!("  Port Proxy:    \x1b[1;34mlocalhost:PORT\x1b[0m (auto-forwarded)");
     println!("  Daemon Logs:   {}", log_dir.join("daemon.log").display());
@@ -136,31 +136,31 @@ pub fn start_daemon() -> Result<()> {
 }
 
 pub fn stop_daemon() -> Result<()> {
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
     let run_dir = cfg.data_dir.join("run");
     let pid_file = run_dir.join("daemon.pid");
 
     if let Some(pid) = is_daemon_running(&run_dir) {
         let _ = kill(Pid::from_raw(pid as i32), Signal::SIGTERM);
         let _ = fs::remove_file(&pid_file);
-        println!("\x1b[1;32m✓\x1b[0m Stopped Mach background daemon (PID: {}).", pid);
+        println!("\x1b[1;32m✓\x1b[0m Stopped mach background daemon (PID: {}).", pid);
     } else {
-        println!("Mach daemon is not currently running.");
+        println!("mach daemon is not currently running.");
     }
 
     Ok(())
 }
 
 pub fn status_daemon() -> Result<()> {
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
     let run_dir = cfg.data_dir.join("run");
 
     if let Some(pid) = is_daemon_running(&run_dir) {
-        println!("\x1b[1;32m●\x1b[0m Mach daemon is \x1b[1;32mrunning\x1b[0m (PID: {}).", pid);
+        println!("\x1b[1;32m●\x1b[0m mach daemon is \x1b[1;32mrunning\x1b[0m (PID: {}).", pid);
         println!("  DNS Responder: \x1b[1;34m127.0.0.1:5354\x1b[0m");
         println!("  Docker Proxy:  \x1b[1;34mActive\x1b[0m");
     } else {
-        println!("\x1b[1;31m○\x1b[0m Mach daemon is \x1b[1mstopped\x1b[0m.");
+        println!("\x1b[1;31m○\x1b[0m mach daemon is \x1b[1mstopped\x1b[0m.");
     }
 
     let (configured, hint) = dns::check_or_setup_resolver();
@@ -178,7 +178,7 @@ pub fn status_daemon() -> Result<()> {
 
 /// Helper to ensure the background daemon is running without noisy output if already active.
 pub fn ensure_daemon_running() {
-    let cfg = match NorbConfig::load() {
+    let cfg = match MachConfig::load() {
         Ok(c) => c,
         Err(_) => return,
     };

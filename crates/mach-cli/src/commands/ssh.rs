@@ -1,7 +1,7 @@
-//! `norb ssh` command implementation.
+//! `mach ssh` command implementation.
 
 use anyhow::{bail, Context, Result};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use mach_common::machine::MachineState;
 use std::process::Command;
 
@@ -9,12 +9,12 @@ use super::{find_machine, load_all_machines};
 
 pub async fn sync() -> Result<()> {
     crate::ssh::sync_ssh_config().await?;
-    println!("\x1b[1;32m✓\x1b[0m Synchronized Norb SSH configuration block in ~/.ssh/config");
+    println!("\x1b[1;32m✓\x1b[0m Synchronized mach SSH configuration block in ~/.ssh/config");
     Ok(())
 }
 
 pub async fn run(name: Option<&str>, extra_args: &[String], details_only: bool) -> Result<()> {
-    let cfg = NorbConfig::load()?;
+    let cfg = MachConfig::load()?;
     let target_name = match name {
         Some(n) => n.to_string(),
         None => {

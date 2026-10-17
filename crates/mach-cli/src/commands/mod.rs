@@ -1,4 +1,4 @@
-//! Command implementations for `norb`.
+//! Command implementations for `mach`.
 
 pub mod boot;
 pub mod clone_cmd;
@@ -38,7 +38,7 @@ pub mod update;
 pub mod version;
 
 use anyhow::{bail, Context, Result};
-use mach_common::config::NorbConfig;
+use mach_common::config::MachConfig;
 use mach_common::machine::{Machine, MachineState};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -97,6 +97,40 @@ pub fn save_machine(machines_dir: &Path, machine: &Machine) -> Result<()> {
     fs::write(path, content)?;
     Ok(())
 }
+/// Returns the visible character width of a string in terminal cells, ignoring ANSI escape sequences.
+pub fn visible_width(s: &str) -> usize {
+    let mut width = 0;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                chars.next(); // consume '['
+                while let Some(esc_c) = chars.next() {
+                    if ('@'..='~').contains(&esc_c) {
+                        break;
+                    }
+                }
+            } else if chars.peek() == Some(&']') {
+                chars.next(); // consume ']'
+                while let Some(esc_c) = chars.next() {
+                    if esc_c == '\x07' || esc_c == '\x1b' {
+                        break;
+                    }
+                }
+            }
+        } else {
+            width += 1;
+        }
+    }
+    width
+}
+
+/// Pads a string with trailing spaces so that its visible width in terminal cells equals `target_width`.
+pub fn pad_to_width(s: &str, target_width: usize) -> String {
+    let v_width = visible_width(s);
+    let pad = target_width.saturating_sub(v_width);
+    format!("{}{}", s, " ".repeat(pad))
+}
 
 /// Resolve the target machine using standard fallback priority:
 /// 1. Explicit name (`name_opt`) -> if specified, must exist or error.
@@ -104,11 +138,11 @@ pub fn save_machine(machines_dir: &Path, machine: &Machine) -> Result<()> {
 /// 3. Single running user machine -> if exactly one user machine is currently running.
 /// 4. Single existing user machine -> if exactly one user machine exists overall.
 /// 5. Error -> if none or ambiguous.
-pub fn resolve_target_machine(cfg: &NorbConfig, name_opt: Option<&str>) -> Result<Machine> {
+pub fn resolve_target_machine(cfg: &MachConfig, name_opt: Option<&str>) -> Result<Machine> {
     resolve_target_machine_ext(cfg, name_opt, false)
 }
 
-pub fn resolve_target_machine_ext(cfg: &NorbConfig, name_opt: Option<&str>, allow_system: bool) -> Result<Machine> {
+pub fn resolve_target_machine_ext(cfg: &MachConfig, name_opt: Option<&str>, allow_system: bool) -> Result<Machine> {
     if let Some(name) = name_opt {
         let m = find_machine(&cfg.machines_dir, name)?
             .with_context(|| format!("machine '{name}' not found"))?;

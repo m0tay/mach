@@ -1,6 +1,6 @@
-//! `norb boot` command implementation.
+//! `mach boot` command implementation.
 //!
-//! Directly exercises the low-level `norb-vmm` hypervisor engine to boot a Linux kernel.
+//! Directly exercises the low-level `mach-vmm` hypervisor engine to boot a Linux kernel.
 
 use anyhow::Result;
 use mach_vmm::{Vmm, VmmConfig};
@@ -14,7 +14,7 @@ pub async fn run(
     memory_mb: u64,
     cpus: u32,
 ) -> Result<()> {
-    println!("\x1b[1;36m➜\x1b[0m Preparing Norb VMM for direct kernel boot...");
+    println!("\x1b[1;36m➜\x1b[0m Preparing mach vmm for direct kernel boot...");
     println!("  Kernel:   \x1b[33m{}\x1b[0m", kernel.display());
     if let Some(i) = initrd {
         println!("  Initrd:   \x1b[33m{}\x1b[0m", i.display());
