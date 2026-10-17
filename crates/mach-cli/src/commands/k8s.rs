@@ -387,7 +387,7 @@ pub async fn status() -> Result<()> {
                 println!("  API Server:  \x1b[1;32m●\x1b[0m \x1b[1;34mhttps://127.0.0.1:26443\x1b[0m (reachable)");
             } else {
                 println!("  API Server:  \x1b[1;31m○\x1b[0m \x1b[1;33mhttps://127.0.0.1:26443\x1b[0m (not responding)");
-                println!("               Run \x1b[1;34mmachctl k8s enable\x1b[0m to restore the tunnel.");
+                println!("               Run \x1b[1;34mmachctl k8s start\x1b[0m to restore the tunnel.");
             }
 
             let home = dirs::home_dir().unwrap_or_default();
@@ -401,12 +401,15 @@ pub async fn status() -> Result<()> {
             }
         }
         Some(m) => {
-            println!("\x1b[1;33m○\x1b[0m Kubernetes node {} is \x1b[1m{}\x1b[0m.", vm_name, m.state);
-            println!("  Run \x1b[1;34mmachctl k8s enable\x1b[0m to start it.");
+            terminate_k8s_ssh_tunnel();
+            println!("\x1b[1;33m○\x1b[0m Kubernetes node {} is \x1b[1;33mstopped\x1b[0m ({})", vm_name, m.state);
+            println!("  API Server:  \x1b[1;33m○ stopped (run 'machctl k8s start')\x1b[0m");
         }
         None => {
+            terminate_k8s_ssh_tunnel();
             println!("\x1b[1;31m○\x1b[0m Kubernetes is not installed.");
-            println!("  Run \x1b[1;34mmachctl k8s enable\x1b[0m to provision a lightweight local cluster.");
+            println!("  API Server:  \x1b[1;33m○ stopped (run 'machctl k8s start')\x1b[0m");
+            println!("  Run \x1b[1;34mmachctl k8s start\x1b[0m to provision a lightweight local cluster.");
         }
     }
 

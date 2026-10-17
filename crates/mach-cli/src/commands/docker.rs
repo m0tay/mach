@@ -263,11 +263,29 @@ pub async fn status() -> Result<()> {
     let docker_vm = super::find_machine(&cfg.machines_dir, DOCKER_VM_NAME)?;
 
     println!("\x1b[1;36m➜\x1b[0m Checking Mach Docker status...");
-    if let Some(m) = docker_vm {
-        println!("  Infrastructure VM: \x1b[1;32m● {}\x1b[0m ({})", m.config.name, m.state);
-    } else {
-        println!("  Infrastructure VM: \x1b[1;33m○ not created\x1b[0m (run `mach docker setup`)");
+
+    // Check VM state FIRST
+    let is_running = match docker_vm.as_ref() {
+        Some(m) => m.state == MachineState::Running,
+        None => false,
+    };
+
+    if !is_running {
+        // Remove stale socket file if present
+        if sock_path.exists() {
+            let _ = std::fs::remove_file(&sock_path);
+        }
+        terminate_docker_ssh_tunnel();
+
+        println!("  Infrastructure VM: \x1b[1;33m○ stopped\x1b[0m");
+        println!("  Socket path:       \x1b[1m{}\x1b[0m", sock_path.display());
+        println!("  Socket file:       \x1b[1;31m✖ not found\x1b[0m");
+        println!("  Engine status:     \x1b[1;33m○ stopped (run 'machctl docker start' to start)\x1b[0m");
+        return Ok(());
     }
+
+    let m = docker_vm.unwrap();
+    println!("  Infrastructure VM: \x1b[1;32m● {}\x1b[0m (running)", m.config.name);
     println!("  Socket path:       \x1b[1m{}\x1b[0m", sock_path.display());
 
     if sock_path.exists() {
@@ -295,8 +313,9 @@ pub async fn status() -> Result<()> {
         println!("  Engine status:     \x1b[1;33m○ socket exists but daemon not responding\x1b[0m");
     } else {
         println!("  Socket file:       \x1b[1;31m✖ not found\x1b[0m");
-        println!("\nRun \x1b[1;34mmach docker setup\x1b[0m to initialize and start the Docker engine.");
+        println!("  Engine status:     \x1b[1;33m○ stopped (run 'machctl docker start' to start)\x1b[0m");
     }
 
     Ok(())
 }
+

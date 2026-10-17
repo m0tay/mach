@@ -48,26 +48,34 @@ assert_contains "$HELP_OUT" "Containers:" "machctl --help lists Containers group
 
 # 2. Doctor test
 echo -e "\n${YELLOW}[2/15] Testing system doctor health checks...${NC}"
-DOC_OUT=$(mach doctor)
+DOC_OUT=$(machctl doctor)
 assert_contains "$DOC_OUT" "Virtualization entitlement present" "Hypervisor entitlement active"
 assert_contains "$DOC_OUT" "macOS Apple Silicon" "Host platform identified as Apple Silicon"
 
 # 3. Config management
 echo -e "\n${YELLOW}[3/15] Testing configuration get/set...${NC}"
-mach config set default_cpus 4
-CFG_OUT=$(mach config show)
-assert_contains "$CFG_OUT" '"default_cpus": 4' "mach config set updates key in JSON"
-mach config set default_cpus 2
-CFG_RESET=$(mach config show)
-assert_contains "$CFG_RESET" '"default_cpus": 2' "mach config set reverts key"
+machctl config set default_cpus 4
+CFG_OUT=$(machctl config show)
+assert_contains "$CFG_OUT" '"default_cpus": 4' "machctl config set updates key in JSON"
+machctl config set default_cpus 2
+CFG_RESET=$(machctl config show)
+assert_contains "$CFG_RESET" '"default_cpus": 2' "machctl config set reverts key"
 
 # 4. Status checks on empty environment
 echo -e "\n${YELLOW}[4/15] Testing docker and k8s status commands...${NC}"
 DOCKER_ST=$(mach docker status)
 assert_contains "$DOCKER_ST" "Checking Mach Docker status" "mach docker status executes"
+assert_contains "$DOCKER_ST" "machctl" "mach docker status provides polite guidance"
+
+DOCKER_CTL_ST=$(machctl docker status)
+assert_contains "$DOCKER_CTL_ST" "Checking Mach Docker status" "machctl docker status executes directly"
 
 K8S_ST=$(mach k8s status)
 assert_contains "$K8S_ST" "Kubernetes" "mach k8s status reports cleanly"
+assert_contains "$K8S_ST" "machctl" "mach k8s status provides polite guidance"
+
+K8S_CTL_ST=$(machctl k8s status)
+assert_contains "$K8S_CTL_ST" "Kubernetes" "machctl k8s status reports cleanly directly"
 
 # 5. Machine creation (Alpine)
 echo -e "\n${YELLOW}[5/15] Testing machine creation (Alpine)...${NC}"
@@ -88,15 +96,15 @@ assert_contains "$DEF_OUT" "test-alp" "mach default sets default machine"
 
 # 7. APFS Copy-on-Write Clone
 echo -e "\n${YELLOW}[7/15] Testing APFS Copy-on-Write clone...${NC}"
-CLONE_OUT=$(mach clone test-alp test-cloned)
-assert_contains "$CLONE_OUT" "cloned" "mach clone creates clone"
+CLONE_OUT=$(machctl clone test-alp test-cloned)
+assert_contains "$CLONE_OUT" "cloned" "machctl clone creates clone"
 LS_CLONE=$(mach ls)
 assert_contains "$LS_CLONE" "test-cloned" "mach ls shows cloned machine"
 
 # 8. Rename machine
 echo -e "\n${YELLOW}[8/15] Testing machine rename...${NC}"
-RENAME_OUT=$(mach rename test-cloned test-renamed)
-assert_contains "$RENAME_OUT" "Renamed" "mach rename succeeds"
+RENAME_OUT=$(machctl rename test-cloned test-renamed)
+assert_contains "$RENAME_OUT" "Renamed" "machctl rename succeeds"
 LS_RENAME=$(mach ls)
 assert_contains "$LS_RENAME" "test-renamed" "mach ls shows renamed machine"
 
@@ -109,16 +117,16 @@ assert_contains "$DEL_OUT" "deleted successfully" "mach delete succeeds with -y"
 echo -e "\n${YELLOW}[10/15] Testing disk export and import...${NC}"
 EXPORT_FILE="/tmp/mach_test_alp.raw"
 rm -f "$EXPORT_FILE"
-EXPORT_OUT=$(mach export test-alp "$EXPORT_FILE")
-assert_contains "$EXPORT_OUT" "exported" "mach export saves raw disk"
+EXPORT_OUT=$(machctl export test-alp "$EXPORT_FILE")
+assert_contains "$EXPORT_OUT" "exported" "machctl export saves raw disk"
 if [ -f "$EXPORT_FILE" ]; then
     report_pass "Exported disk file exists on host"
 else
     report_fail "Exported disk file does not exist on host"
 fi
 
-IMPORT_OUT=$(mach import "$EXPORT_FILE" test-imported)
-assert_contains "$IMPORT_OUT" "Imported" "mach import creates new machine from raw disk"
+IMPORT_OUT=$(machctl import "$EXPORT_FILE" test-imported)
+assert_contains "$IMPORT_OUT" "Imported" "machctl import creates new machine from raw disk"
 mach delete test-imported -y > /dev/null
 rm -f "$EXPORT_FILE"
 report_pass "Imported machine deleted and export artifact cleaned up"
