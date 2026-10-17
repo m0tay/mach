@@ -39,7 +39,7 @@ echo -e "${BLUE}======================================================${NC}\n"
 # 1. Version test
 echo -e "${YELLOW}[1/15] Testing version and help output...${NC}"
 VER_OUT=$(mach version)
-assert_contains "$VER_OUT" "Mach" "mach version returns valid header"
+assert_contains "$VER_OUT" "mach" "mach version returns valid header"
 assert_contains "$VER_OUT" "0.1.0" "mach version returns semantic version"
 
 HELP_OUT=$(machctl --help)
@@ -64,11 +64,11 @@ assert_contains "$CFG_RESET" '"default_cpus": 2' "machctl config set reverts key
 # 4. Status checks on empty environment
 echo -e "\n${YELLOW}[4/15] Testing docker and k8s status commands...${NC}"
 DOCKER_ST=$(mach docker status)
-assert_contains "$DOCKER_ST" "Checking Mach Docker status" "mach docker status executes"
+assert_contains "$DOCKER_ST" "Checking mach Docker status" "mach docker status executes"
 assert_contains "$DOCKER_ST" "machctl" "mach docker status provides polite guidance"
 
 DOCKER_CTL_ST=$(machctl docker status)
-assert_contains "$DOCKER_CTL_ST" "Checking Mach Docker status" "machctl docker status executes directly"
+assert_contains "$DOCKER_CTL_ST" "Checking mach Docker status" "machctl docker status executes directly"
 
 K8S_ST=$(mach k8s status)
 assert_contains "$K8S_ST" "Kubernetes" "mach k8s status reports cleanly"

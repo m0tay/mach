@@ -3,7 +3,7 @@
 use anyhow::Result;
 
 pub async fn run() -> Result<()> {
-    println!("\x1b[1mMach\x1b[0m — Supersonic Linux Virtualization & Container Engine for Apple Silicon");
+    println!("\x1b[1mmach\x1b[0m — Supersonic Linux Virtualization & Container Engine for Apple Silicon");
     println!("  Version:       v{}", env!("CARGO_PKG_VERSION"));
     println!("  Target:        {}-apple-darwin", std::env::consts::ARCH);
     println!("  Hypervisor:    Apple Virtualization.framework");
