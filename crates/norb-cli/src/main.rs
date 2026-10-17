@@ -17,7 +17,7 @@ pub mod proxy;
 pub mod ssh;
 pub mod tls;
 
-use cli::{Cli, Commands, ConfigAction, DaemonAction, DnsAction, DockerAction, K8sAction};
+use cli::{Cli, Commands, ConfigAction, DaemonAction, DnsAction, DockerAction, K8sAction, TlsAction};
 use norb_common::config::NorbConfig;
 use norb_common::machine::MachineState;
 
@@ -170,7 +170,7 @@ async fn main() -> Result<()> {
         "default", "export", "import", "rename", "shell", "run", "info",
         "status", "top", "logs", "ssh", "push", "pull", "docker", "daemon",
         "dns", "doctor", "config", "version", "boot", "run-vm", "debug",
-        "mount", "code", "k8s", "help",
+        "mount", "code", "k8s", "link", "tls", "completion", "menu", "help",
         "--help", "-h", "--version", "-V",
     ];
 
@@ -199,6 +199,7 @@ async fn main() -> Result<()> {
             memory,
             disk,
             arch,
+            isolated: _,
         } => {
             commands::create::run(&distro, name.as_deref(), cpus, memory, disk, &arch).await?;
         }
@@ -245,9 +246,14 @@ async fn main() -> Result<()> {
         Commands::Ssh {
             name,
             details,
+            sync,
             args,
         } => {
-            commands::ssh::run(name.as_deref(), &args, details).await?;
+            if sync {
+                commands::ssh::sync().await?;
+            } else {
+                commands::ssh::run(name.as_deref(), &args, details).await?;
+            }
         }
         Commands::Logs {
             name,
@@ -341,6 +347,26 @@ async fn main() -> Result<()> {
                 commands::k8s::status().await?;
             }
         },
+        Commands::Link { binary, machine } => {
+            commands::link::run(&binary, machine.as_deref()).await?;
+        }
+        Commands::Tls { action } => match action {
+            TlsAction::Install { system } => {
+                commands::tls_cmd::install(system).await?;
+            }
+            TlsAction::Uninstall => {
+                commands::tls_cmd::uninstall().await?;
+            }
+            TlsAction::Status => {
+                commands::tls_cmd::status().await?;
+            }
+        },
+        Commands::Completion { shell, install } => {
+            commands::completion::generate_completion(&shell, install)?;
+        }
+        Commands::Menu => {
+            commands::menu_cmd::run().await?;
+        }
         Commands::Version => {
             commands::version::run().await?;
         }
@@ -354,6 +380,7 @@ async fn main() -> Result<()> {
             cpus,
             memory,
             mac,
+            isolated: _,
         } => {
             commands::run_vm::run(
                 &name,

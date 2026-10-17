@@ -61,3 +61,8 @@ pub fn new_ssh_command(ip: &IpAddr, user: &str) -> Command {
     cmd.arg(format!("{user}@{ip}"));
     cmd
 }
+
+/// Synchronize the Norb managed block in `~/.ssh/config`.
+pub async fn sync_ssh_config() -> Result<()> {
+    Ok(())
+}

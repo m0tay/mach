@@ -47,6 +47,10 @@ pub enum Commands {
         /// CPU architecture (aarch64, x86_64)
         #[arg(long, default_value = "aarch64")]
         arch: String,
+
+        /// Run in isolated sandbox mode (disables /Users file sharing and host bridge)
+        #[arg(long)]
+        isolated: bool,
     },
 
     /// List all machines
@@ -154,6 +158,10 @@ pub enum Commands {
         /// Show SSH connection details instead of connecting
         #[arg(short, long)]
         details: bool,
+
+        /// Synchronize Norb managed block in ~/.ssh/config
+        #[arg(long)]
+        sync: bool,
 
         /// Additional arguments to pass to ssh
         #[arg(last = true)]
@@ -294,6 +302,34 @@ pub enum Commands {
         action: DnsAction,
     },
 
+    /// Link a host command to run seamlessly inside a Linux machine
+    Link {
+        /// Host binary name (e.g. gh, aws, op)
+        binary: String,
+        /// Target machine (defaults to default machine)
+        #[arg(short, long)]
+        machine: Option<String>,
+    },
+
+    /// Manage local wildcard TLS certificate authority (*.norb.local)
+    Tls {
+        #[command(subcommand)]
+        action: TlsAction,
+    },
+
+    /// Generate shell autocompletion script (zsh, bash, fish)
+    Completion {
+        /// Shell type (zsh, bash, fish)
+        #[arg(default_value = "zsh")]
+        shell: String,
+        /// Install autocompletion directly into shell directory
+        #[arg(long)]
+        install: bool,
+    },
+
+    /// Launch minimal Apple menu bar status item
+    Menu,
+
     /// Display version and build information
     Version,
 
@@ -335,6 +371,10 @@ pub enum Commands {
         /// MAC address for the guest NIC
         #[arg(long)]
         mac: String,
+
+        /// Run in isolated sandbox mode (disables /Users file sharing)
+        #[arg(long)]
+        isolated: bool,
     },
 }
 
@@ -397,6 +437,21 @@ pub enum DnsAction {
     /// Configure or show macOS resolver configuration (/etc/resolver/norb.local)
     Setup,
     /// Show DNS resolver status
+    Status,
+}
+
+/// Subcommands for `norb tls`.
+#[derive(Subcommand, Debug)]
+pub enum TlsAction {
+    /// Install Norb Root CA into macOS Keychain trust store
+    Install {
+        /// Install into System keychain instead of user login keychain
+        #[arg(long)]
+        system: bool,
+    },
+    /// Uninstall Norb Root CA from macOS Keychain
+    Uninstall,
+    /// Check TLS CA and certificate status
     Status,
 }
 

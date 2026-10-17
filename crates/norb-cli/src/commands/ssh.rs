@@ -7,6 +7,10 @@ use std::process::Command;
 
 use super::{find_machine, load_all_machines};
 
+pub async fn sync() -> Result<()> {
+    crate::ssh::sync_ssh_config().await
+}
+
 pub async fn run(name: Option<&str>, extra_args: &[String], details_only: bool) -> Result<()> {
     let cfg = NorbConfig::load()?;
     let target_name = match name {
