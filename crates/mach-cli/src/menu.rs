@@ -98,6 +98,22 @@ mod imp {
         f(receiver, sel);
     }
 
+    #[repr(C)]
+    #[derive(Copy, Clone)]
+    struct NSSize {
+        width: f64,
+        height: f64,
+    }
+
+    #[inline]
+    unsafe fn msg_send_size(receiver: *mut c_void, sel: *mut c_void, size: NSSize) {
+        let f: unsafe extern "C" fn(*mut c_void, *mut c_void, NSSize) =
+            std::mem::transmute(objc_msgSend as *const ());
+        f(receiver, sel, size);
+    }
+
+    static EMBEDDED_MENU_ICON: &[u8] = include_bytes!("../../../assets/mach_menu_icon@2x.png");
+
     unsafe fn ns_string(s: &str) -> *mut c_void {
         let cls = objc_getClass(b"NSString\0".as_ptr() as _);
         let sel = sel_registerName(b"stringWithUTF8String:\0".as_ptr() as _);
@@ -630,26 +646,44 @@ end tell"#,
                 sel_registerName(b"button\0".as_ptr() as _),
             );
             if !button.is_null() {
-                let mut has_image = false;
-                if let Some(icon_path) = find_menu_icon_path() {
-                    if let Some(path_str) = icon_path.to_str() {
-                        let path_ns = ns_string(path_str);
-                        let img_cls = objc_getClass(b"NSImage\0".as_ptr() as _);
-                        if !img_cls.is_null() {
+                let img_cls = objc_getClass(b"NSImage\0".as_ptr() as _);
+                let mut image: *mut c_void = std::ptr::null_mut();
+
+                if !img_cls.is_null() {
+                    // 1. Try file path if available
+                    if let Some(icon_path) = find_menu_icon_path() {
+                        if let Some(path_str) = icon_path.to_str() {
+                            let path_ns = ns_string(path_str);
                             let img_alloc = msg_send_0(img_cls, sel_registerName(b"alloc\0".as_ptr() as _));
-                            let image = msg_send_1(img_alloc, sel_registerName(b"initWithContentsOfFile:\0".as_ptr() as _), path_ns);
-                            if !image.is_null() {
-                                // setTemplate:YES allows macOS to adapt icon for dark/light mode
-                                msg_send_bool(image, sel_registerName(b"setTemplate:\0".as_ptr() as _), 1);
-                                msg_send_1(button, sel_registerName(b"setImage:\0".as_ptr() as _), image);
-                                msg_send_1(button, sel_registerName(b"setTitle:\0".as_ptr() as _), ns_string(""));
-                                has_image = true;
+                            image = msg_send_1(img_alloc, sel_registerName(b"initWithContentsOfFile:\0".as_ptr() as _), path_ns);
+                        }
+                    }
+
+                    // 2. Fall back to embedded high-resolution retina icon
+                    if image.is_null() && !EMBEDDED_MENU_ICON.is_empty() {
+                        let data_cls = objc_getClass(b"NSData\0".as_ptr() as _);
+                        if !data_cls.is_null() {
+                            let sel_data = sel_registerName(b"dataWithBytes:length:\0".as_ptr() as _);
+                            let f_data: unsafe extern "C" fn(*mut c_void, *mut c_void, *const u8, usize) -> *mut c_void =
+                                std::mem::transmute(objc_msgSend as *const ());
+                            let ns_data = f_data(data_cls, sel_data, EMBEDDED_MENU_ICON.as_ptr(), EMBEDDED_MENU_ICON.len());
+                            if !ns_data.is_null() {
+                                let img_alloc = msg_send_0(img_cls, sel_registerName(b"alloc\0".as_ptr() as _));
+                                image = msg_send_1(img_alloc, sel_registerName(b"initWithData:\0".as_ptr() as _), ns_data);
                             }
                         }
                     }
                 }
-                if !has_image {
-                    msg_send_1(button, sel_registerName(b"setTitle:\0".as_ptr() as _), ns_string(" Mach"));
+
+                if !image.is_null() {
+                    // Set explicit logical point size for macOS status item (18.0 x 18.0 pt)
+                    msg_send_size(image, sel_registerName(b"setSize:\0".as_ptr() as _), NSSize { width: 18.0, height: 18.0 });
+                    // setTemplate:YES allows macOS to adapt the monochrome stencil for dark/light mode
+                    msg_send_bool(image, sel_registerName(b"setTemplate:\0".as_ptr() as _), 1);
+                    msg_send_1(button, sel_registerName(b"setImage:\0".as_ptr() as _), image);
+                    msg_send_1(button, sel_registerName(b"setTitle:\0".as_ptr() as _), ns_string(""));
+                } else {
+                    msg_send_1(button, sel_registerName(b"setTitle:\0".as_ptr() as _), ns_string("⚡️"));
                 }
                 msg_send_1(
                     button,

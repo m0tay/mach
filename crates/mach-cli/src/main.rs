@@ -183,7 +183,7 @@ async fn main() -> Result<()> {
         // everything else (info, top, logs, ps, uname, apt...) transparently runs in Linux!
         let mach_machine_commands = [
             "start", "stop", "restart", "shell", "create", "delete", "list", "ls",
-            "menu", "run", "setup", "completion", "boot", "run-vm", "help", "--help", "-h", "--version", "-V", "version", "update",
+            "menu", "run", "setup", "init", "completion", "boot", "run-vm", "help", "--help", "-h", "--version", "-V", "version", "update",
             "clone", "default", "export", "import", "rename", "info", "status", "top", "logs",
             "ssh", "push", "pull", "docker", "daemon", "dns", "doctor", "config", "debug",
             "mount", "code", "k8s", "link", "tls",
@@ -206,7 +206,7 @@ async fn main() -> Result<()> {
             "default", "export", "import", "rename", "shell", "run", "info",
             "status", "top", "logs", "ssh", "push", "pull", "docker", "daemon",
             "dns", "doctor", "config", "version", "update", "boot", "run-vm", "debug",
-            "mount", "code", "k8s", "link", "tls", "completion", "menu", "setup", "help",
+            "mount", "code", "k8s", "link", "tls", "completion", "menu", "setup", "init", "help",
             "--help", "-h", "--version", "-V",
         ];
 
@@ -429,8 +429,15 @@ async fn main() -> Result<()> {
         Commands::Menu => {
             commands::menu_cmd::run().await?;
         }
-        Commands::Setup { welcome } => {
-            commands::setup::run(welcome).await?;
+        Commands::Init { non_interactive } => {
+            commands::init::run(non_interactive).await?;
+        }
+        Commands::Setup { welcome, non_interactive } => {
+            if non_interactive {
+                commands::init::run(true).await?;
+            } else {
+                commands::setup::run(welcome).await?;
+            }
         }
         Commands::Version => {
             commands::version::run().await?;

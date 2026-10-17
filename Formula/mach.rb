@@ -3,7 +3,7 @@ class Mach < Formula
   homepage "https://github.com/douglaslobo/mach"
   url "file:///Users/douglaslobo/Developer/norb/dist/mach-0.1.0-aarch64-apple-darwin.tar.gz"
   version "0.1.0"
-  sha256 "6178cea9cdcea50cbbe9eeea6dfb0f73187ea34e52338df119e78807dc1f768e"
+  sha256 "aa373d84916cbaa519501e0c4cb01a9c65fc01ce22eefd2102b596ef066194cb"
   license "MIT"
 
   depends_on :macos
@@ -31,17 +31,23 @@ class Mach < Formula
     (fish_completion/"mach.fish").write Utils.safe_popen_read(bin/"mach", "completion", "fish") rescue nil
   end
 
+  def post_install
+    # Initialize Mach environment, configs, keys, contexts safely without overwriting user data
+    system bin/"mach", "init", "--non-interactive"
+  end
+
   def caveats
     <<~EOS
-      ⚡️ Mach is installed and ready on your Apple Silicon Mac!
+      ⚡️ Mach is initialized and ready on your Apple Silicon Mac!
 
       Quickstart:
         • Open Linux shell:         mach
         • Run Linux commands:       mach uname -a
         • Docker containers:        docker ps
         • Kubernetes cluster:       kubectl get nodes
-        • Activity dashboard:       mach top
+        • Activity dashboard:       machctl top
         • Open files in Finder:     open ~/Mach
+        • macOS Menu bar:           mach menu
     EOS
   end
 

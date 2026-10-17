@@ -272,14 +272,24 @@ pub async fn status() -> Result<()> {
 
     if sock_path.exists() {
         println!("  Socket file:       \x1b[1;32m● present\x1b[0m");
-        let output = Command::new("docker")
-            .args(["--context", "mach", "version", "--format", "{{.Server.Version}}"])
-            .output();
-        if let Ok(out) = output {
-            if out.status.success() {
-                let ver = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                println!("  Engine status:     \x1b[1;32m● connected\x1b[0m (version: {ver})");
-                return Ok(());
+        let responsive = tokio::time::timeout(
+            std::time::Duration::from_millis(400),
+            tokio::net::UnixStream::connect(&sock_path),
+        )
+        .await
+        .map(|res| res.is_ok())
+        .unwrap_or(false);
+
+        if responsive {
+            let output = Command::new("docker")
+                .args(["--context", "mach", "version", "--format", "{{.Server.Version}}"])
+                .output();
+            if let Ok(out) = output {
+                if out.status.success() {
+                    let ver = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    println!("  Engine status:     \x1b[1;32m● connected\x1b[0m (version: {ver})");
+                    return Ok(());
+                }
             }
         }
         println!("  Engine status:     \x1b[1;33m○ socket exists but daemon not responding\x1b[0m");

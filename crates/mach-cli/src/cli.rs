@@ -352,11 +352,22 @@ pub enum Commands {
     /// Launch minimal Apple menu bar status item
     Menu,
 
+    /// Initialize Mach configuration, keys, Docker context, and run diagnostics
+    Init {
+        /// Non-interactive mode (for automated scripts and package managers)
+        #[arg(long)]
+        non_interactive: bool,
+    },
+
     /// Initial environment setup and onboarding tour
     Setup {
         /// Display interactive welcome tour in plain English
         #[arg(long, default_value_t = true)]
         welcome: bool,
+
+        /// Non-interactive mode
+        #[arg(long)]
+        non_interactive: bool,
     },
 
     /// Display version and build information

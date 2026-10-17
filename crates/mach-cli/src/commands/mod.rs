@@ -14,6 +14,7 @@ pub mod docker;
 pub mod doctor;
 pub mod export_import;
 pub mod info;
+pub mod init;
 pub mod k8s;
 pub mod link;
 pub mod list;
