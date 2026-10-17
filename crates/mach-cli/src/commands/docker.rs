@@ -222,7 +222,7 @@ pub fn setup_system_symlink(sock_path: &Path) {
     if sys_sock.is_symlink() {
         if let Ok(target) = std::fs::read_link(sys_sock) {
             if target == sock_path {
-                println!("\x1b[1;32m✓\x1b[0m System /var/run/docker.sock is already linked to Mach.");
+                println!("\x1b[1;32m✓\x1b[0m System /var/run/docker.sock is already linked to mach.");
                 return;
             }
         }
@@ -249,7 +249,7 @@ pub async fn status() -> Result<()> {
     let sock_path = cfg.data_dir.join("run").join("docker.sock");
     let docker_vm = super::find_machine(&cfg.machines_dir, DOCKER_VM_NAME)?;
 
-    println!("\x1b[1;36m➜\x1b[0m Checking Mach Docker status...");
+    println!("\x1b[1;36m➜\x1b[0m Checking mach Docker status...");
 
     // Check VM state FIRST
     let is_running = match docker_vm.as_ref() {

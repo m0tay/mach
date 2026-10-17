@@ -134,13 +134,13 @@ pub async fn run() -> Result<()> {
                 let mode = meta.permissions().mode() & 0o777;
                 if (mode & 0o077) == 0 {
                     println!(
-                        "  \x1b[1;32m✓\x1b[0m Mach SSH Key:        {} (mode {:04o})",
+                        "  \x1b[1;32m✓\x1b[0m mach SSH Key:        {} (mode {:04o})",
                         dedicated_priv.display(),
                         mode
                     );
                 } else {
                     println!(
-                        "  \x1b[1;33m!\x1b[0m Mach SSH Key:        {} permissions too open (mode {:04o}, securing to 0600)",
+                        "  \x1b[1;33m!\x1b[0m mach SSH Key:        {} permissions too open (mode {:04o}, securing to 0600)",
                         dedicated_priv.display(),
                         mode
                     );
@@ -150,7 +150,7 @@ pub async fn run() -> Result<()> {
         }
     } else {
         println!(
-            "  \x1b[1;33m!\x1b[0m Mach SSH Key:        Not found in ~/.mach/ssh/ (will be generated automatically on start)"
+            "  \x1b[1;33m!\x1b[0m mach SSH Key:        Not found in ~/.mach/ssh/ (will be generated automatically on start)"
         );
     }
 
@@ -185,7 +185,7 @@ pub async fn run() -> Result<()> {
         if stdout.contains("mach") {
             println!("  \x1b[1;32m✓\x1b[0m Docker Context:      'mach' context configured in Docker CLI");
         } else {
-            println!("  \x1b[1;33m!\x1b[0m Docker Context:      'mach' context not configured (run `mach docker setup`)");
+            println!("  \x1b[1;33m!\x1b[0m Docker Context:      'mach' context not configured (run `machctl docker setup`)");
         }
     }
 

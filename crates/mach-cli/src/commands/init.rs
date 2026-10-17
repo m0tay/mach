@@ -7,9 +7,9 @@ use std::process::Command;
 
 pub async fn run(non_interactive: bool) -> Result<()> {
     if !non_interactive {
-        println!("\x1b[1;36m➜\x1b[0m Initializing Mach environment...");
+        println!("\x1b[1;36m➜\x1b[0m Initializing mach environment...");
     } else {
-        println!("==> Initializing Mach environment...");
+        println!("==> Initializing mach environment...");
     }
 
     let home = dirs::home_dir().context("could not determine user home directory")?;
@@ -51,12 +51,12 @@ pub async fn run(non_interactive: bool) -> Result<()> {
         } else {
             legacy_config.display().to_string()
         };
-        println!("  \x1b[1;32m✓\x1b[0m Preserved existing Mach configuration ({})", active_cfg);
+        println!("  \x1b[1;32m✓\x1b[0m Preserved existing mach configuration ({})", active_cfg);
     }
 
     // 3. Dedicated Mach SSH key pair
     let ssh_key_path = crate::ssh::ensure_mach_ssh_key()
-        .context("failed to generate or verify Mach dedicated SSH key")?;
+        .context("failed to generate or verify mach dedicated SSH key")?;
     println!("  \x1b[1;32m✓\x1b[0m Dedicated SSH keys ready ({})", ssh_key_path.display());
 
     // 4. Safe ~/.ssh/config integration (NEVER OVERWRITE USER CONFIGS)
@@ -90,7 +90,7 @@ pub async fn run(non_interactive: bool) -> Result<()> {
                     "--docker",
                     &format!("host=unix://{}", sock_path.display()),
                     "--description",
-                    "Mach Docker Engine (Apple Silicon)",
+                    "mach Docker Engine (Apple Silicon)",
                 ])
                 .output();
             let _ = Command::new("docker").args(["context", "use", "mach"]).output();
@@ -112,6 +112,6 @@ pub async fn run(non_interactive: bool) -> Result<()> {
     println!();
     let _ = crate::commands::doctor::run().await;
 
-    println!("\n\x1b[1;32m✓\x1b[0m Mach initialization complete and ready to use!");
+    println!("\n\x1b[1;32m✓\x1b[0m mach initialization complete and ready to use!");
     Ok(())
 }

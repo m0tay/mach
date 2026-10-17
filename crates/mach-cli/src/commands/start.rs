@@ -451,7 +451,7 @@ pub async fn run_ext(name: Option<&str>, to_stderr: bool) -> Result<()> {
 
     if !to_stderr {
         println!("\nRun \x1b[1;34mmach shell {}\x1b[0m to enter the machine.", machine.config.name);
-        println!("Run \x1b[1;32mdocker ps\x1b[0m (or \x1b[1;32mmach docker setup\x1b[0m) to control containers.");
+        println!("Run \x1b[1;32mdocker ps\x1b[0m (or \x1b[1;32mmachctl docker setup\x1b[0m) to control containers.");
     }
 
     Ok(())
