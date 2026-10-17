@@ -1,4 +1,4 @@
-//! Command implementations for mach.
+//! Command implementations for `mach`.
 
 pub mod boot;
 pub mod clone_cmd;
@@ -96,6 +96,40 @@ pub fn save_machine(machines_dir: &Path, machine: &Machine) -> Result<()> {
     let content = serde_json::to_string_pretty(machine)?;
     fs::write(path, content)?;
     Ok(())
+}
+/// Returns the visible character width of a string in terminal cells, ignoring ANSI escape sequences.
+pub fn visible_width(s: &str) -> usize {
+    let mut width = 0;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                chars.next(); // consume '['
+                while let Some(esc_c) = chars.next() {
+                    if ('@'..='~').contains(&esc_c) {
+                        break;
+                    }
+                }
+            } else if chars.peek() == Some(&']') {
+                chars.next(); // consume ']'
+                while let Some(esc_c) = chars.next() {
+                    if esc_c == '\x07' || esc_c == '\x1b' {
+                        break;
+                    }
+                }
+            }
+        } else {
+            width += 1;
+        }
+    }
+    width
+}
+
+/// Pads a string with trailing spaces so that its visible width in terminal cells equals `target_width`.
+pub fn pad_to_width(s: &str, target_width: usize) -> String {
+    let v_width = visible_width(s);
+    let pad = target_width.saturating_sub(v_width);
+    format!("{}{}", s, " ".repeat(pad))
 }
 
 /// Resolve the target machine using standard fallback priority:

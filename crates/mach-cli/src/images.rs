@@ -1,4 +1,4 @@
-//! Multi-distro image manager and cache for Mach.
+//! Multi-distro image manager and cache for mach.
 
 use anyhow::{bail, Context, Result};
 use std::fs;

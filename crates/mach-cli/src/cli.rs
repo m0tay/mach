@@ -20,7 +20,7 @@ pub struct Cli {
     pub verbose: bool,
 }
 
-/// Available Mach CLI subcommands.
+/// Available mach CLI subcommands.
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Create a new Linux machine
@@ -181,7 +181,7 @@ pub enum Commands {
         #[arg(short, long)]
         details: bool,
 
-        /// Synchronize Mach managed block in ~/.ssh/config
+        /// Synchronize mach managed block in ~/.ssh/config
         #[arg(long)]
         sync: bool,
 
@@ -230,7 +230,7 @@ pub enum Commands {
         dest: String,
     },
 
-    /// Check if Mach is properly configured and healthy
+    /// Check if mach is properly configured and healthy
     Doctor,
 
     /// Display detailed information about a machine
@@ -278,7 +278,7 @@ pub enum Commands {
         cpus: u32,
     },
 
-    /// View or update Mach configuration
+    /// View or update mach configuration
     Config {
         #[command(subcommand)]
         action: ConfigAction,

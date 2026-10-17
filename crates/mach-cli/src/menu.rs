@@ -1,4 +1,4 @@
-//! Minimal Apple Silicon macOS Menu Bar status item for Mach.
+//! Minimal Apple Silicon macOS Menu Bar status item for mach.
 //!
 //! Provides a native status item in the macOS menu bar (` mach`)
 //! displaying running machines, dynamic IP addresses, Docker socket status,
@@ -620,7 +620,7 @@ end tell"#,
     }
 
     pub fn run_menu_bar() -> Result<()> {
-        println!("\x1b[1;36m➜\x1b[0m Starting mach Menu Bar status item (\x1b[1m mach\x1b[0m)...");
+        println!("\x1b[1;36m➜\x1b[0m Starting mach menu bar status item (\x1b[1m mach\x1b[0m)...");
 
         unsafe {
             let pool = objc_autoreleasePoolPush();
@@ -717,7 +717,7 @@ end tell"#,
                 msg_send_1(
                     button,
                     sel_registerName(b"setToolTip:\0".as_ptr() as _),
-                    ns_string("Mach Virtualization & Containers"),
+                    ns_string("mach Virtualization & Containers"),
                 );
             } else {
                 msg_send_1(
@@ -743,7 +743,7 @@ end tell"#,
             let menu = msg_send_1(
                 menu,
                 sel_registerName(b"initWithTitle:\0".as_ptr() as _),
-                ns_string("Mach"),
+                ns_string("mach"),
             );
             msg_send_0(menu, sel_registerName(b"retain\0".as_ptr() as _));
 
@@ -797,7 +797,7 @@ end tell"#,
                 menu,
             );
 
-            println!("\x1b[1;32m✓\x1b[0m Mach status item active in macOS menu bar.");
+            println!("\x1b[1;32m✓\x1b[0m mach status item active in macOS menu bar.");
             println!("  Click \x1b[1m mach\x1b[0m in your top status bar to view running machines and controls.");
 
             objc_autoreleasePoolPop(pool);
@@ -817,5 +817,5 @@ pub fn run_menu_bar() -> Result<()> {
 
 #[cfg(not(target_os = "macos"))]
 pub fn run_menu_bar() -> Result<()> {
-    anyhow::bail!("Mach Menu Bar is only supported on macOS");
+    anyhow::bail!("mach Menu Bar is only supported on macOS");
 }

@@ -343,7 +343,7 @@ pub async fn run(interval_secs: u64) -> Result<()> {
 
         // Render Dashboard Header
         println!(
-            "\x1b[1;36mMACH TOP\x1b[0m ── \x1b[1m{}\x1b[0m ── Refresh: {}s \x1b[90m│\x1b[0m Host: macOS Apple Silicon ({}) \x1b[90m│\x1b[0m VMM: Apple Virtualization",
+            "\x1b[1;36mmach top\x1b[0m ── \x1b[1m{}\x1b[0m ── Refresh: {}s \x1b[90m│\x1b[0m Host: macOS Apple Silicon ({}) \x1b[90m│\x1b[0m VMM: Apple Virtualization",
             chrono::Local::now().format("%H:%M:%S"),
             interval_secs.max(1),
             std::env::consts::ARCH
@@ -379,12 +379,12 @@ pub async fn run(interval_secs: u64) -> Result<()> {
         // Table Header
         if show_bars {
             println!(
-                "\x1b[1m{:<14} {:<10} {:<12} {:<7} {:<8} {:<30} {:<24} {:<15}\x1b[0m",
+                "\x1b[1m{:<14} {:<10} {:<12} {:<7} {:<8} {:<33} {:<32} {:<15}\x1b[0m",
                 "NAME", "DISTRO", "STATE", "PID", "CPU %", "MEMORY (RSS / ALLOC)", "APFS DISK (USED/PROV)", "IP ADDRESS"
             );
         } else {
             println!(
-                "\x1b[1m{:<14} {:<10} {:<12} {:<7} {:<8} {:<22} {:<22} {:<15}\x1b[0m",
+                "\x1b[1m{:<14} {:<10} {:<12} {:<7} {:<8} {:<24} {:<24} {:<15}\x1b[0m",
                 "NAME", "DISTRO", "STATE", "PID", "CPU %", "MEMORY (RSS / ALLOC)", "APFS DISK (USED/PROV)", "IP ADDRESS"
             );
         }
@@ -400,12 +400,12 @@ pub async fn run(interval_secs: u64) -> Result<()> {
                     .unwrap_or_else(|| "-".into());
 
                 let state_str = match row.state {
-                    MachineState::Running => "\x1b[1;32m● running \x1b[0m",
+                    MachineState::Running => "\x1b[1;32m● running\x1b[0m",
                     MachineState::Starting => "\x1b[1;33m◐ starting\x1b[0m",
                     MachineState::Stopping => "\x1b[1;33m◑ stopping\x1b[0m",
-                    MachineState::Stopped => "\x1b[2m○ stopped \x1b[0m",
+                    MachineState::Stopped => "\x1b[2m○ stopped\x1b[0m",
                     MachineState::Creating => "\x1b[1;34m◌ creating\x1b[0m",
-                    MachineState::Error(_) => "\x1b[1;31m✖ error   \x1b[0m",
+                    MachineState::Error(_) => "\x1b[1;31m✖ error\x1b[0m",
                 };
 
                 let cpu_str = if row.state == MachineState::Running {
@@ -481,26 +481,26 @@ pub async fn run(interval_secs: u64) -> Result<()> {
 
                 if show_bars {
                     println!(
-                        "{:<14} {:<10} {} {:<7} {} {:<39} {:<33} {:<15}",
+                        "{:<14} {:<10} {} {:<7} {} {} {} {:<15}",
                         name_truncated,
                         distro_truncated,
-                        state_str,
+                        super::pad_to_width(state_str, 12),
                         pid_str,
-                        cpu_str,
-                        mem_str,
-                        disk_str,
+                        super::pad_to_width(&cpu_str, 8),
+                        super::pad_to_width(&mem_str, 33),
+                        super::pad_to_width(&disk_str, 32),
                         row.ip_str
                     );
                 } else {
                     println!(
-                        "{:<14} {:<10} {} {:<7} {} {:<22} {:<22} {:<15}",
+                        "{:<14} {:<10} {} {:<7} {} {} {} {:<15}",
                         name_truncated,
                         distro_truncated,
-                        state_str,
+                        super::pad_to_width(state_str, 12),
                         pid_str,
-                        cpu_str,
-                        mem_str,
-                        disk_str,
+                        super::pad_to_width(&cpu_str, 8),
+                        super::pad_to_width(&mem_str, 24),
+                        super::pad_to_width(&disk_str, 24),
                         row.ip_str
                     );
                 }

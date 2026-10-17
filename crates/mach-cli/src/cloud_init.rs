@@ -82,6 +82,7 @@ chpasswd:
     debian:debian
     ubuntu:ubuntu
     fedora:fedora
+    mach:mach
   expire: False
 users:
   - name: root

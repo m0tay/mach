@@ -63,7 +63,7 @@ fn check_apfs_cow_capability(target_dir: &std::path::Path) -> bool {
 }
 
 pub async fn run() -> Result<()> {
-    println!("\x1b[1mMach Doctor — System Health Check\x1b[0m");
+    println!("\x1b[1mmach doctor — System Health Check\x1b[0m");
     println!("───────────────────────────────────────────────────");
 
     let mut all_ok = true;
@@ -232,7 +232,7 @@ pub async fn run() -> Result<()> {
 
     println!("───────────────────────────────────────────────────");
     if all_ok {
-        println!("\x1b[1;32m✓ All system checks passed! Mach is ready for supersonic performance.\x1b[0m\n");
+        println!("\x1b[1;32m✓ All system checks passed! mach is ready for supersonic performance.\x1b[0m\n");
     } else {
         println!("\x1b[1;33m! Some checks reported warnings or recommendations.\x1b[0m\n");
     }

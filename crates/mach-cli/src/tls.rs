@@ -75,7 +75,7 @@ pub fn ensure_ca_cert(data_dir: &Path) -> Result<(PathBuf, PathBuf)> {
 }
 
 /// Ensure local wildcard TLS certificate exists for `*.mach.local`, `mach.local`, and `127.0.0.1`,
-/// signed by the persistent Mach Root CA.
+/// signed by the persistent mach Root CA.
 pub fn ensure_tls_cert(data_dir: &Path) -> Result<TlsConfig> {
     let ssl_dir = data_dir.join("ssl");
     fs::create_dir_all(&ssl_dir)

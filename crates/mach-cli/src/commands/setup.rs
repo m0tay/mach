@@ -8,10 +8,10 @@ use mach_common::machine::MachineState;
 pub async fn run(welcome: bool) -> Result<()> {
     if welcome {
         println!("\x1b[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
-        println!(" \x1b[1;37m👋 Welcome to Mach!\x1b[0m");
+        println!(" \x1b[1;37m👋 Welcome to mach!\x1b[0m");
         println!(" \x1b[0;36mThe supersonic, zero-overhead Linux & container engine for Apple Silicon Macs.\x1b[0m");
         println!("\x1b[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
-        println!("\nMach gives your Mac native Linux superpowers:");
+        println!("\nmach gives your Mac native Linux superpowers:");
         println!("  • \x1b[1mSub-second startup\x1b[0m: Boots full Linux machines in under 1 second.");
         println!("  • \x1b[1mStandard Docker\x1b[0m: Use your regular macOS `docker` CLI with zero background bloat.");
         println!("  • \x1b[1mLocal Kubernetes (K3s)\x1b[0m: Ready-to-go cluster with instant `kubectl` compatibility.");
@@ -78,9 +78,11 @@ pub async fn run(welcome: bool) -> Result<()> {
         println!("    \x1b[1;32m✓\x1b[0m Standard Docker CLI context 'mach' configured");
     }
 
-    // 5b. Shell tab autocompletions
-    let _ = crate::commands::completion::generate_completion("zsh", true);
-    let _ = crate::commands::completion::generate_completion("bash", true);
+    // 5b. Shell tab autocompletions (silently install scripts to shell directories)
+    if let Some(home) = dirs::home_dir() {
+        let _ = crate::commands::completion::install_zsh(&home);
+        let _ = crate::commands::completion::install_bash(&home);
+    }
     println!("    \x1b[1;32m✓\x1b[0m Shell tab autocompletions installed for Zsh and Bash");
 
     // 5c. Finder file hierarchy
@@ -93,7 +95,7 @@ pub async fn run(welcome: bool) -> Result<()> {
 
     // 5e. Apple menu bar status item
     crate::commands::menu_cmd::ensure_menu_bar_running();
-    println!("    \x1b[1;32m✓\x1b[0m Native Apple menu bar status item auto-started ( Mach)");
+    println!("    \x1b[1;32m✓\x1b[0m Native Apple menu bar status item auto-started ( mach)");
 
     if welcome {
         println!("\n\x1b[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
@@ -120,7 +122,7 @@ pub async fn run(welcome: bool) -> Result<()> {
         println!("   \x1b[1;32mmachctl top\x1b[0m");
         println!("   (Real-time CPU, resident memory, and APFS disk savings)");
         println!("\n\x1b[1m7. Minimal Apple Menu Bar Icon:\x1b[0m");
-        println!("   \x1b[1;32m Mach\x1b[0m is already active in your macOS menu bar!");
+        println!("   \x1b[1;32m mach\x1b[0m is already active in your macOS menu bar!");
         println!("   (Click the icon in your menu bar to view live states, IP, and shortcuts)");
         println!("\n\x1b[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n");
     }

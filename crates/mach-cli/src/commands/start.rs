@@ -30,7 +30,7 @@ fn resolve_assets(cfg: &MachConfig) -> Result<(PathBuf, PathBuf)> {
     }
 
     bail!(
-        "mach Linux assets not found in {} or ./assets.\nRun `./scratch/build_rootfs.sh` or check ~/.mach/assets.",
+        "mach Linux assets not found in {} or ./assets.\nCheck ~/.mach/assets.",
         home_assets.display()
     );
 }
@@ -162,6 +162,31 @@ fn lookup_dhcp_lease(
 }
 
 pub async fn run(name: Option<&str>) -> Result<()> {
+    run_ext(name, false).await
+}
+
+pub async fn run_ext(name: Option<&str>, to_stderr: bool) -> Result<()> {
+    macro_rules! out_ln {
+        ($($arg:tt)*) => {
+            if to_stderr {
+                eprintln!($($arg)*);
+            } else {
+                println!($($arg)*);
+            }
+        };
+    }
+
+    macro_rules! out_pr {
+        ($($arg:tt)*) => {
+            if to_stderr {
+                eprint!($($arg)*);
+                let _ = std::io::Write::flush(&mut std::io::stderr());
+            } else {
+                print!($($arg)*);
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+            }
+        };
+    }
     let cfg = MachConfig::load()?;
 
     let target_name = match name {
@@ -185,10 +210,10 @@ pub async fn run(name: Option<&str>) -> Result<()> {
     // Check if already running by checking PID
     if let Some(pid) = machine.pid {
         if nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None).is_ok() {
-            println!("Machine \x1b[1m{}\x1b[0m is already running (PID: {}).", machine.config.name, pid);
+            out_ln!("Machine \x1b[1m{}\x1b[0m is already running (PID: {}).", machine.config.name, pid);
             if let Some(ip) = machine.ip_address {
-                println!("  IP Address:  \x1b[1;34m{}\x1b[0m", ip);
-                println!("  SSH Command: \x1b[1;32mssh root@{}\x1b[0m", ip);
+                out_ln!("  IP Address:  \x1b[1;34m{}\x1b[0m", ip);
+                out_ln!("  SSH Command: \x1b[1;32mssh root@{}\x1b[0m", ip);
             }
             return Ok(());
         }
@@ -196,7 +221,7 @@ pub async fn run(name: Option<&str>) -> Result<()> {
 
     let (mac_str, lease_pattern) = generate_mac(&machine.id);
 
-    println!("\x1b[1;36m➜\x1b[0m Booting real Linux VM \x1b[1m{}\x1b[0m on Apple Silicon...", machine.config.name);
+    out_ln!("\x1b[1;36m➜\x1b[0m Booting real Linux VM \x1b[1m{}\x1b[0m on Apple Silicon...", machine.config.name);
 
     let machine_dir = cfg.machines_dir.join(&machine.config.name);
     fs::create_dir_all(&machine_dir)?;
@@ -265,8 +290,7 @@ pub async fn run(name: Option<&str>) -> Result<()> {
     let child_pid = child.id();
     fs::write(machine_dir.join("pid"), child_pid.to_string())?;
 
-    print!("  Waiting for network & DHCP lease...");
-    std::io::Write::flush(&mut std::io::stdout())?;
+    out_pr!("  Waiting for network & DHCP lease...");
 
     let mut assigned_ip = None;
     let mut last_leases_mtime = None;
@@ -284,7 +308,7 @@ pub async fn run(name: Option<&str>) -> Result<()> {
         }
     }
 
-    println!();
+    out_ln!();
 
     let ip = match assigned_ip {
         Some(ip) => ip,
@@ -295,8 +319,7 @@ pub async fn run(name: Option<&str>) -> Result<()> {
     };
 
     // Probe TCP port 22 with 100ms backoff before SSH auth loop to avoid spawning failed child processes
-    print!("  Waiting for SSH service to become ready...");
-    std::io::Write::flush(&mut std::io::stdout())?;
+    out_pr!("  Waiting for SSH service to become ready...");
 
     let mut port_open = false;
     for _ in 0..600 {
@@ -333,7 +356,7 @@ pub async fn run(name: Option<&str>) -> Result<()> {
         }
         sleep(Duration::from_millis(500)).await;
     }
-    println!();
+    out_ln!();
 
     if !ssh_ready {
         let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(child_pid as i32), nix::sys::signal::Signal::SIGTERM);
@@ -354,13 +377,13 @@ pub async fn run(name: Option<&str>) -> Result<()> {
     // Immediately publish native Apple Silicon mDNS domain (<name>.mach.local)
     crate::mdns::register_immediate(&machine.config.name, ip);
 
-    println!(
+    out_ln!(
         "\x1b[1;32m✓\x1b[0m Machine \x1b[1m{}\x1b[0m is UP and RUNNING (PID: {}).",
         machine.config.name, child_pid
     );
-    println!("  IP Address:  \x1b[1;34m{}\x1b[0m", ip);
-    println!("  Domain:      \x1b[1;34m{}.mach.local\x1b[0m", machine.config.name);
-    println!("  SSH Command: \x1b[1;32mssh root@{}\x1b[0m", ip);
+    out_ln!("  IP Address:  \x1b[1;34m{}\x1b[0m", ip);
+    out_ln!("  Domain:      \x1b[1;34m{}.mach.local\x1b[0m", machine.config.name);
+    out_ln!("  SSH Command: \x1b[1;32mssh root@{}\x1b[0m", ip);
 
     // Mount and register Apple Rosetta 2 for Linux if available
     let mut rosetta_args = base_ssh.clone();
@@ -377,7 +400,7 @@ pub async fn run(name: Option<&str>) -> Result<()> {
 
         if let Ok(out) = rosetta_res {
             if String::from_utf8_lossy(&out.stdout).contains("rosetta_ready") {
-                println!("  Rosetta 2:   \x1b[1;32mActive\x1b[0m (x86_64 emulation enabled)");
+                out_ln!("  Rosetta 2:   \x1b[1;32mActive\x1b[0m (x86_64 emulation enabled)");
                 break;
             }
         }
@@ -418,7 +441,7 @@ pub async fn run(name: Option<&str>) -> Result<()> {
                 sleep(Duration::from_millis(200)).await;
             }
 
-            println!("  Docker:      \x1b[1;34munix://{}\x1b[0m", host_sock.display());
+            out_ln!("  Docker:      \x1b[1;34munix://{}\x1b[0m", host_sock.display());
         }
     }
 
@@ -426,8 +449,10 @@ pub async fn run(name: Option<&str>) -> Result<()> {
     crate::commands::daemon::ensure_daemon_running();
     crate::commands::menu_cmd::ensure_menu_bar_running();
 
-    println!("\nRun \x1b[1;34mmach shell {}\x1b[0m to enter the machine.", machine.config.name);
-    println!("Run \x1b[1;32mdocker ps\x1b[0m (or \x1b[1;32mmach docker setup\x1b[0m) to control containers.");
+    if !to_stderr {
+        println!("\nRun \x1b[1;34mmach shell {}\x1b[0m to enter the machine.", machine.config.name);
+        println!("Run \x1b[1;32mdocker ps\x1b[0m (or \x1b[1;32mmach docker setup\x1b[0m) to control containers.");
+    }
 
     Ok(())
 }

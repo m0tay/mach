@@ -23,7 +23,7 @@ use mach_common::config::MachConfig;
 use mach_common::machine::MachineState;
 
 fn print_mach_help() {
-    println!(r#"Mach's short "mach" daily-driver command:
+    println!(r#"mach's short "mach" daily-driver command:
 
 1. Interactive Linux Shell
    Run "mach" with no arguments to drop into your default Linux machine:
@@ -59,9 +59,9 @@ For the full system control plane, Kubernetes, Docker, activity monitor, and dia
 }
 
 fn print_machctl_help() {
-    println!(r#"Mach Control Plane (machctl) — System administration and management.
+    println!(r#"mach control plane (machctl) — System administration and management.
 
-Use "machctl" for configuring, monitoring, and managing your Mach virtualization environment.
+Use "machctl" for configuring, monitoring, and managing your mach virtualization environment.
 For daily Linux shell and transparent command execution, use "mach".
 
 Usage:
@@ -70,8 +70,8 @@ Usage:
 Linux machines:
   create      Create a new Linux machine
   list        List all machines (alias: ls)
-  start       Start Mach or a machine
-  stop        Stop Mach or a machine
+  start       Start mach or a machine
+  stop        Stop mach or a machine
   restart     Restart a machine
   delete      Delete a machine
   info        Get detailed info about a machine
@@ -94,15 +94,15 @@ Containers:
 
 System & Infrastructure:
   top         Live activity and resource monitor (CPU, Memory, APFS CoW disk)
-  status      Check whether Mach and machines are running
+  status      Check whether mach and machines are running
   doctor      Verify hypervisor entitlements, network, and system health
-  config      View or modify Mach configuration (~/.mach/config.yaml)
+  config      View or modify mach configuration (~/.mach/config.yaml)
   daemon      Manage background DNS (*.mach.local) and port forwarder
   dns         Configure macOS native DNS resolver
   tls         Manage local wildcard TLS certificates (*.mach.local)
-  menu        Launch native macOS menu bar status item ( Mach)
+  menu        Launch native macOS menu bar status item ( mach)
   setup       Run initial onboarding and environment setup
-  version     Show Mach version
+  version     Show mach version
 
 Flags:
   -h, --help      help for machctl
@@ -134,7 +134,7 @@ async fn main() -> Result<()> {
         let user_machines: Vec<_> = machines.iter().filter(|m| !m.is_system()).collect();
 
         if user_machines.is_empty() {
-            println!("No user machines found. Welcome to Mach! Starting initial environment setup...\n");
+            println!("No user machines found. Welcome to mach! Starting initial environment setup...\n");
             commands::setup::run(true).await?;
             return Ok(());
         }
@@ -177,112 +177,114 @@ async fn main() -> Result<()> {
 
     // Case 2: Subcommand routing
     let mut effective_args = raw_args.clone();
-    let first_arg = &raw_args[1];
 
     if !is_ctl {
-        // If a user types `mach docker status` or `mach k8s status`, or an administrative action,
-        // or if the guest VM is not running: provide clear, polite guidance pointing to machctl.
-        if first_arg == "docker" || first_arg == "k8s" {
-            let sub = raw_args.get(2).map(|s| s.as_str());
-            let is_admin = match first_arg.as_str() {
-                "docker" => matches!(
-                    sub,
-                    Some("status")
-                        | Some("setup")
-                        | Some("start")
-                        | Some("stop")
-                        | Some("restart")
-                        | Some("destroy")
-                        | Some("shell")
-                        | None
-                ),
-                "k8s" => matches!(
-                    sub,
-                    Some("status")
-                        | Some("enable")
-                        | Some("disable")
-                        | Some("start")
-                        | Some("stop")
-                        | Some("restart")
-                        | Some("shell")
-                        | None
-                ),
-                _ => false,
-            };
+        let first_cmd_idx = raw_args
+            .iter()
+            .skip(1)
+            .position(|arg| arg != "-v" && arg != "--verbose")
+            .map(|i| i + 1);
 
-            let cfg_res = NorbConfig::load();
-            let vm_not_running = if let Ok(ref cfg) = cfg_res {
-                let vm_name = if first_arg == "docker" {
-                    commands::docker::DOCKER_VM_NAME.to_string()
-                } else {
-                    commands::k8s::resolve_k8s_machine_name(&cfg.machines_dir)
-                        .unwrap_or_else(|_| commands::k8s::K8S_VM_NAME.to_string())
+        if let Some(idx) = first_cmd_idx {
+            let first_arg = &raw_args[idx];
+            // If a user types `mach docker status` or `mach k8s status`, or an administrative action,
+            // or if the guest VM is not running: provide clear, polite guidance pointing to machctl.
+            if first_arg == "docker" || first_arg == "k8s" {
+                let sub = raw_args.get(idx + 1).map(|s| s.as_str());
+                let is_admin = match first_arg.as_str() {
+                    "docker" => matches!(
+                        sub,
+                        Some("status")
+                            | Some("setup")
+                            | Some("start")
+                            | Some("stop")
+                            | Some("restart")
+                            | Some("destroy")
+                            | Some("shell")
+                            | None
+                    ),
+                    "k8s" => matches!(
+                        sub,
+                        Some("status")
+                            | Some("enable")
+                            | Some("disable")
+                            | Some("start")
+                            | Some("stop")
+                            | Some("restart")
+                            | Some("shell")
+                            | None
+                    ),
+                    _ => false,
                 };
-                commands::find_machine(&cfg.machines_dir, &vm_name)
-                    .ok()
-                    .flatten()
-                    .map(|m| m.state != MachineState::Running)
-                    .unwrap_or(true)
-            } else {
-                true
-            };
 
-            if is_admin || vm_not_running {
-                println!("In Mach, 'machctl' manages the macOS virtualization control plane. Use: machctl docker status (or machctl k8s status). 'mach' executes commands directly inside Linux (e.g. 'mach docker ps').\n");
+                let cfg_res = MachConfig::load();
+                let vm_not_running = if let Ok(ref cfg) = cfg_res {
+                    let vm_name = if first_arg == "docker" {
+                        commands::docker::DOCKER_VM_NAME.to_string()
+                    } else {
+                        commands::k8s::resolve_k8s_machine_name(&cfg.machines_dir)
+                            .unwrap_or_else(|_| commands::k8s::K8S_VM_NAME.to_string())
+                    };
+                    commands::find_machine(&cfg.machines_dir, &vm_name)
+                        .ok()
+                        .flatten()
+                        .map(|m| m.state != MachineState::Running)
+                        .unwrap_or(true)
+                } else {
+                    true
+                };
 
-                if first_arg == "docker" {
-                    match sub {
-                        Some("status") | None => return commands::docker::status().await,
-                        Some("start") => return commands::docker::start().await,
-                        Some("stop") => return commands::docker::stop().await,
-                        Some("restart") => return commands::docker::restart().await,
-                        Some("setup") => {
-                            let system = raw_args.iter().any(|a| a == "--system");
-                            return commands::docker::setup(system).await;
+                if is_admin || vm_not_running {
+                    println!("In mach, 'machctl' manages the macOS virtualization control plane. Use: machctl docker status (or machctl k8s status). 'mach' executes commands directly inside Linux (e.g. 'mach docker ps').\n");
+
+                    if first_arg == "docker" {
+                        match sub {
+                            Some("status") | None => return commands::docker::status().await,
+                            Some("start") => return commands::docker::start().await,
+                            Some("stop") => return commands::docker::stop().await,
+                            Some("restart") => return commands::docker::restart().await,
+                            Some("setup") => {
+                                let system = raw_args.iter().any(|a| a == "--system");
+                                return commands::docker::setup(system).await;
+                            }
+                            Some("destroy") => {
+                                let force = raw_args.iter().any(|a| a == "-f" || a == "--force" || a == "-y" || a == "--yes");
+                                return commands::docker::destroy(force).await;
+                            }
+                            Some("shell") => return commands::docker::shell().await,
+                            _ => {
+                                // Non-admin command (e.g. `mach docker ps` with stopped VM)
+                                // falls through to transparent execution in Linux (run_cmd will auto-start)
+                            }
                         }
-                        Some("destroy") => {
-                            let force = raw_args.iter().any(|a| a == "-f" || a == "--force" || a == "-y" || a == "--yes");
-                            return commands::docker::destroy(force).await;
-                        }
-                        Some("shell") => return commands::docker::shell().await,
-                        _ => {
-                            // Non-admin command (e.g. `mach docker ps` with stopped VM)
-                            // falls through to transparent execution in Linux (run_cmd will auto-start)
-                        }
-                    }
-                } else if first_arg == "k8s" {
-                    match sub {
-                        Some("status") | None => return commands::k8s::status().await,
-                        Some("enable") | Some("start") => return commands::k8s::enable().await,
-                        Some("disable") | Some("stop") => return commands::k8s::disable().await,
-                        Some("restart") => return commands::k8s::restart().await,
-                        Some("shell") => return commands::k8s::shell().await,
-                        _ => {
-                            // Fall through
+                    } else if first_arg == "k8s" {
+                        match sub {
+                            Some("status") | None => return commands::k8s::status().await,
+                            Some("enable") | Some("start") => return commands::k8s::enable().await,
+                            Some("disable") | Some("stop") => return commands::k8s::disable().await,
+                            Some("restart") => return commands::k8s::restart().await,
+                            Some("shell") => return commands::k8s::shell().await,
+                            _ => {
+                                // Fall through
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // In `mach`, only basic machine verbs are intercepted locally;
-        // everything else (info, top, logs, ps, uname, apt...) transparently runs in Linux!
-        let mach_machine_commands = [
-            "start", "stop", "restart", "shell", "create", "delete", "list", "ls",
-            "default", "init", "help", "--help", "-h", "version", "--version", "-V",
-            "menu", "run", "setup", "completion", "boot", "run-vm", "update",
-            "info", "status", "logs", "ssh", "push", "pull",
-        ];
+            // In `mach`, only basic machine verbs are intercepted locally;
+            // everything else (info, top, logs, ps, uname, apt...) transparently runs in Linux!
+            let mach_machine_commands = [
+                "start", "stop", "restart", "shell", "create", "delete", "list", "ls",
+                "default", "init", "help", "--help", "-h", "version", "--version", "-V",
+                "menu", "run", "setup", "completion", "boot", "run-vm", "update",
+                "info", "status", "logs", "ssh", "push", "pull",
+            ];
 
-        if !mach_machine_commands.contains(&first_arg.as_str())
-            && first_arg != "-v"
-            && first_arg != "--verbose"
-            && !first_arg.starts_with("-m")
-            && !first_arg.starts_with("--machine")
-            && !first_arg.starts_with("-u")
-            && !first_arg.starts_with("--user")
-        {
-            effective_args.insert(1, "run".to_string());
+            let cmd_name = &raw_args[idx];
+            if !mach_machine_commands.contains(&cmd_name.as_str()) {
+                effective_args.insert(idx, "run".to_string());
+            }
         }
     } else {
         // In `machctl`, all control plane commands are recognized
@@ -295,11 +297,17 @@ async fn main() -> Result<()> {
             "--help", "-h", "--version", "-V",
         ];
 
-        if !machctl_commands.contains(&first_arg.as_str())
-            && first_arg != "-v"
-            && first_arg != "--verbose"
-        {
-            effective_args.insert(1, "run".to_string());
+        let first_cmd_idx = raw_args
+            .iter()
+            .skip(1)
+            .position(|arg| arg != "-v" && arg != "--verbose")
+            .map(|i| i + 1);
+
+        if let Some(idx) = first_cmd_idx {
+            let cmd_name = &raw_args[idx];
+            if !machctl_commands.contains(&cmd_name.as_str()) {
+                effective_args.insert(idx, "run".to_string());
+            }
         }
     }
 

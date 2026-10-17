@@ -17,7 +17,7 @@ pub async fn run() -> Result<()> {
     println!("\x1b[1mmach system status\x1b[0m");
     println!("─────────────────────────────────────────");
     println!("  Version:            v{}", env!("CARGO_PKG_VERSION"));
-    println!("  Hypervisor Engine:  Apple Hypervisor.framework (Rust native VMM)");
+    println!("  Hypervisor Engine:  Apple Virtualization.framework (Rust native VMM)");
     println!("  Architecture:       {}", std::env::consts::ARCH);
     println!("  Total Machines:     {}", total);
     println!("  Running Machines:   \x1b[1;32m{}\x1b[0m", running);

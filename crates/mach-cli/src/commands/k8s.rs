@@ -96,7 +96,7 @@ async fn wait_for_ssh_ready(ip: &std::net::IpAddr) -> Result<()> {
 pub async fn enable() -> Result<()> {
     let cfg = MachConfig::load()?;
 
-    println!("\x1b[1;36m➜\x1b[0m Checking Mach Kubernetes cluster...");
+    println!("\x1b[1;36m➜\x1b[0m Checking mach Kubernetes cluster...");
 
     let vm_name = resolve_k8s_machine_name(&cfg.machines_dir)?;
     let machine = find_machine(&cfg.machines_dir, &vm_name)?;

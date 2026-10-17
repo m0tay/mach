@@ -262,7 +262,7 @@ fn handle_request(raw_json: &str) -> BridgeResponse {
 
 /// Script content to be installed in guest at `/usr/local/bin/mac`
 pub const GUEST_MAC_SCRIPT: &str = r#"#!/usr/bin/env bash
-# macOS host bridge client for Mach
+# macOS host bridge client for mach
 GATEWAY_IP="192.168.64.1"
 PORT=32222
 
