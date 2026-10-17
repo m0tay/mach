@@ -9,39 +9,92 @@ pub async fn setup(system: bool) -> Result<()> {
     let cfg = NorbConfig::load()?;
     let sock_path = cfg.data_dir.join("run").join("docker.sock");
 
-    if !sock_path.exists() {
+    let sock_active = if sock_path.exists() {
+        tokio::net::UnixStream::connect(&sock_path).await.is_ok()
+    } else {
+        false
+    };
+
+    if !sock_active {
+        let _ = std::fs::remove_file(&sock_path);
+        // Terminate any stale SSH tunnels forwarding docker.sock
+        if let Ok(output) = Command::new("ps").args(["-eo", "pid,command"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if line.contains("ssh") && line.contains("docker.sock:/var/run/docker.sock") {
+                    if let Some(pid_str) = line.split_whitespace().next() {
+                        if let Ok(pid) = pid_str.parse::<i32>() {
+                            let _ = nix::sys::signal::kill(
+                                nix::unistd::Pid::from_raw(pid),
+                                nix::sys::signal::Signal::SIGTERM,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         let machines = super::load_all_machines(&cfg.machines_dir)?;
-        if let Some(m) = machines.iter().find(|m| m.state == norb_common::machine::MachineState::Running) {
-            if let Some(ip) = m.ip_address {
+        // Never select norb-k8s for Docker host; select default or non-k8s machine
+        let target_machine = machines
+            .iter()
+            .find(|m| {
+                m.config.name != crate::commands::k8s::K8S_VM_NAME
+                    && cfg.default_machine.as_deref() == Some(&m.config.name)
+            })
+            .or_else(|| {
+                machines
+                    .iter()
+                    .find(|m| m.config.name != crate::commands::k8s::K8S_VM_NAME && m.state == norb_common::machine::MachineState::Running)
+            })
+            .or_else(|| {
+                machines
+                    .iter()
+                    .find(|m| m.config.name != crate::commands::k8s::K8S_VM_NAME)
+            });
+
+        if let Some(m) = target_machine {
+            if m.state != norb_common::machine::MachineState::Running {
+                crate::commands::start::run(Some(&m.config.name)).await?;
+            }
+            let running_m = super::find_machine(&cfg.machines_dir, &m.config.name)?.unwrap();
+            if let Some(ip) = running_m.ip_address {
                 let base_ssh = crate::ssh::norb_ssh_args();
                 let mut check_args = base_ssh.clone();
-                check_args.extend(["-o".to_string(), "ConnectTimeout=2".to_string(), format!("root@{ip}"), "test -S /var/run/docker.sock".to_string()]);
-                let is_running = Command::new("ssh").args(&check_args).status().map(|s| s.success()).unwrap_or(false);
+                check_args.extend([
+                    "-o".to_string(), "ConnectTimeout=2".to_string(),
+                    format!("root@{ip}"),
+                    "test -S /var/run/docker.sock".to_string(),
+                ]);
+
+                let is_running = Command::new("ssh")
+                    .args(&check_args)
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+
                 if !is_running {
-                    let distro = m.config.distro.to_ascii_lowercase();
-                    println!("  \x1b[1;36m➜\x1b[0m Starting Docker daemon in guest {}...", m.config.name);
+                    let distro = running_m.config.distro.to_ascii_lowercase();
+                    println!("  \x1b[1;36m➜\x1b[0m Ensuring Docker daemon is installed and active in guest {}...", running_m.config.name);
                     let start_cmd = if distro.contains("alpine") {
-                        "which dockerd >/dev/null || (apk update >/dev/null 2>&1; apk add --no-cache docker >/dev/null 2>&1 || true); (pidof dockerd >/dev/null || dockerd --data-root /var/lib/docker >/var/log/dockerd.log 2>&1 &)"
+                        "which dockerd >/dev/null || (apk update >/dev/null 2>&1 && apk add --no-cache docker >/dev/null 2>&1); (pidof dockerd >/dev/null || dockerd --data-root /var/lib/docker >/var/log/dockerd.log 2>&1 &)"
                     } else if distro.contains("debian") || distro.contains("ubuntu") {
-                        "which dockerd >/dev/null || (apt-get update -y >/dev/null 2>&1 && apt-get install -y docker.io >/dev/null 2>&1 || true); systemctl enable --now docker >/dev/null 2>&1 || true"
+                        "which dockerd >/dev/null || (apt-get update -y >/dev/null 2>&1 && apt-get install -y docker.io containerd >/dev/null 2>&1); systemctl enable --now docker >/dev/null 2>&1"
                     } else if distro.contains("fedora") {
-                        "which dockerd >/dev/null || (dnf install -y docker-ce >/dev/null 2>&1 || dnf install -y moby-engine >/dev/null 2>&1 || dnf install -y docker >/dev/null 2>&1 || true); systemctl enable --now docker >/dev/null 2>&1 || true"
+                        "which dockerd >/dev/null || (dnf install -y docker-ce moby-engine >/dev/null 2>&1 || dnf install -y docker >/dev/null 2>&1); systemctl enable --now docker >/dev/null 2>&1"
                     } else {
-                        "if [ -f /etc/alpine-release ]; then \
-                            which dockerd >/dev/null || (apk update >/dev/null 2>&1; apk add --no-cache docker >/dev/null 2>&1 || true); (pidof dockerd >/dev/null || dockerd --data-root /var/lib/docker >/var/log/dockerd.log 2>&1 &); \
-                        elif command -v apt-get >/dev/null 2>&1; then \
-                            which dockerd >/dev/null || (apt-get update -y >/dev/null 2>&1 && apt-get install -y docker.io >/dev/null 2>&1 || true); systemctl enable --now docker >/dev/null 2>&1 || true; \
-                        elif command -v dnf >/dev/null 2>&1; then \
-                            which dockerd >/dev/null || (dnf install -y docker-ce >/dev/null 2>&1 || dnf install -y moby-engine >/dev/null 2>&1 || dnf install -y docker >/dev/null 2>&1 || true); systemctl enable --now docker >/dev/null 2>&1 || true; \
-                        else \
-                            (pidof dockerd >/dev/null || dockerd --data-root /var/lib/docker >/var/log/dockerd.log 2>&1 &); \
-                        fi"
+                        "which dockerd >/dev/null || (apt-get update -y >/dev/null 2>&1 && apt-get install -y docker.io >/dev/null 2>&1); systemctl enable --now docker >/dev/null 2>&1 || dockerd &"
                     };
 
                     let mut start_args = base_ssh.clone();
-                    start_args.extend(["-o".to_string(), "ConnectTimeout=45".to_string(), format!("root@{ip}"), start_cmd.to_string()]);
+                    start_args.extend([
+                        "-o".to_string(), "ConnectTimeout=120".to_string(),
+                        format!("root@{ip}"),
+                        start_cmd.to_string(),
+                    ]);
                     let _ = Command::new("ssh").args(&start_args).status();
-                    for _ in 0..25 {
+
+                    for _ in 0..30 {
                         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                         if Command::new("ssh").args(&check_args).status().map(|s| s.success()).unwrap_or(false) {
                             break;
@@ -52,12 +105,22 @@ pub async fn setup(system: bool) -> Result<()> {
                 let run_dir = cfg.data_dir.join("run");
                 let _ = std::fs::create_dir_all(&run_dir);
                 let _ = std::fs::remove_file(&sock_path);
-                let mut docker_fwd_args = vec!["-f".to_string(), "-nNT".to_string(), "-L".to_string(), format!("{}:/var/run/docker.sock", sock_path.display())];
+
+                let mut docker_fwd_args = vec![
+                    "-f".to_string(),
+                    "-nNT".to_string(),
+                    "-L".to_string(),
+                    format!("{}:/var/run/docker.sock", sock_path.display()),
+                ];
                 docker_fwd_args.extend(base_ssh);
-                docker_fwd_args.extend(["-o".to_string(), "ConnectTimeout=5".to_string(), format!("root@{ip}")]);
+                docker_fwd_args.extend([
+                    "-o".to_string(), "ConnectTimeout=5".to_string(),
+                    format!("root@{ip}"),
+                ]);
                 let _ = Command::new("ssh").args(&docker_fwd_args).status();
+
                 for _ in 0..30 {
-                    if sock_path.exists() {
+                    if sock_path.exists() && tokio::net::UnixStream::connect(&sock_path).await.is_ok() {
                         break;
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(200)).await;

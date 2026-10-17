@@ -178,22 +178,28 @@ pub async fn enable() -> Result<()> {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    // Update kubeconfig:
+    // Update kubeconfig cleanly without touching base64 certificate data:
     // - server: https://127.0.0.1:26443
     // - cluster: norb
     // - context: norb
     // - current-context: norb
     let raw_yaml = String::from_utf8_lossy(&get_conf.stdout);
-    let replaced_defaults = raw_yaml.replace("default", "norb");
     let mut patched_lines = Vec::new();
-    for line in replaced_defaults.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("server:") {
-            let indent = line.len() - trimmed.len();
-            patched_lines.push(format!("{}server: https://127.0.0.1:26443", " ".repeat(indent)));
-        } else if trimmed.starts_with("current-context:") {
-            let indent = line.len() - trimmed.len();
-            patched_lines.push(format!("{}current-context: norb", " ".repeat(indent)));
+    for line in raw_yaml.lines() {
+        let trimmed = line.trim();
+        let leading_spaces = line.len() - line.trim_start().len();
+        let indent = " ".repeat(leading_spaces);
+
+        if trimmed == "name: default" {
+            patched_lines.push(format!("{}name: norb", indent));
+        } else if trimmed == "cluster: default" {
+            patched_lines.push(format!("{}cluster: norb", indent));
+        } else if trimmed == "user: default" {
+            patched_lines.push(format!("{}user: norb", indent));
+        } else if trimmed == "current-context: default" {
+            patched_lines.push(format!("{}current-context: norb", indent));
+        } else if trimmed.starts_with("server:") {
+            patched_lines.push(format!("{}server: https://127.0.0.1:26443", indent));
         } else {
             patched_lines.push(line.to_string());
         }
@@ -210,12 +216,45 @@ pub async fn enable() -> Result<()> {
     let norb_kubeconfig = kube_dir.join("config.norb");
     fs::write(&norb_kubeconfig, &patched_yaml)?;
 
-    // Set or merge into ~/.kube/config
+    // Set or merge into ~/.kube/config safely, NEVER overwriting user's active context without permission
     let main_config = kube_dir.join("config");
     if !main_config.exists() {
         fs::write(&main_config, &patched_yaml)?;
     } else {
-        // Attempt clean merge via kubectl config view --flatten
+        // 1. Create a timestamped backup before touching anything
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let backup_file = kube_dir.join(format!("config.bak.{}", timestamp));
+        let _ = fs::copy(&main_config, &backup_file);
+
+        // 2. Remember user's existing active context
+        let prev_context = Command::new("kubectl")
+            .args(["config", "current-context"])
+            .output()
+            .ok()
+            .and_then(|o| if o.status.success() {
+                let ctx = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if ctx.is_empty() { None } else { Some(ctx) }
+            } else {
+                None
+            });
+
+        // 3. Remove any stale 'norb' entries from main config before merging
+        if let Some(main_str) = main_config.to_str() {
+            let _ = Command::new("kubectl")
+                .args(["--kubeconfig", main_str, "config", "delete-cluster", "norb"])
+                .output();
+            let _ = Command::new("kubectl")
+                .args(["--kubeconfig", main_str, "config", "delete-context", "norb"])
+                .output();
+            let _ = Command::new("kubectl")
+                .args(["--kubeconfig", main_str, "config", "delete-user", "norb"])
+                .output();
+        }
+
+        // 4. Attempt clean merge via kubectl config view --flatten
         let merge_res = Command::new("kubectl")
             .env("KUBECONFIG", format!("{}:{}", main_config.display(), norb_kubeconfig.display()))
             .args(["config", "view", "--flatten"])
@@ -233,9 +272,17 @@ pub async fn enable() -> Result<()> {
         let _ = Command::new("kubectl")
             .args(["config", "set-context", "norb", "--cluster=norb", "--user=norb"])
             .output();
-        let _ = Command::new("kubectl")
-            .args(["config", "use-context", "norb"])
-            .output();
+
+        // 4. If the user already had an active context set (and it wasn't norb), restore it!
+        if let Some(ctx) = prev_context {
+            if ctx != "norb" {
+                let _ = Command::new("kubectl")
+                    .args(["config", "use-context", &ctx])
+                    .output();
+                println!("  Preserved existing active kubectl context: \x1b[1m{}\x1b[0m", ctx);
+                println!("  (To switch to norb: \x1b[1;32mkubectl config use-context norb\x1b[0m)");
+            }
+        }
     }
 
     println!("\x1b[1;32m✓\x1b[0m Kubernetes cluster \x1b[1mnorb\x1b[0m is UP and READY!");
