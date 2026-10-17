@@ -54,7 +54,14 @@ pub async fn run(name: Option<&str>, extra_args: &[String], details_only: bool) 
         println!("  Hostname:    {}.norb.local", machine.config.name);
         println!("  User:        root");
         println!("  Port:        22");
-        println!("  SSH Command: \x1b[1;32mssh root@{}\x1b[0m", ip_str);
+        let key_path = cfg.data_dir.join("ssh").join("id_ed25519");
+        if key_path.exists() {
+            println!("  Identity:    {}", key_path.display());
+            println!("  SSH Command: \x1b[1;32mssh -i {} root@{}\x1b[0m", key_path.display(), ip_str);
+        } else {
+            println!("  SSH Command: \x1b[1;32mssh root@{}\x1b[0m", ip_str);
+        }
+        println!("\n  \x1b[1;33mTip:\x1b[0m To enter an interactive shell directly, run \x1b[1;32mnorb\x1b[0m (or \x1b[1;32mnorb shell {}\x1b[0m).", machine.config.name);
         return Ok(());
     }
 

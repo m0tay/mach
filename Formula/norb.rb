@@ -3,7 +3,7 @@ class Norb < Formula
   homepage "https://github.com/douglaslobo/norb"
   url "file:///Users/douglaslobo/Developer/norb/dist/norb-0.1.0-aarch64-apple-darwin.tar.gz"
   version "0.1.0"
-  sha256 "25afeac45b9c6d4a927b778364974d94a8b94ec260c38b62cd8f8446298478a6"
+  sha256 "2c6340352b95adb1f4e0788e43e1ed27a553ad54fe9e6fd6b21b08740363e70d"
   license "MIT"
 
   depends_on :macos

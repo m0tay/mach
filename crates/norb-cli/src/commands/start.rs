@@ -421,6 +421,7 @@ pub async fn run(name: Option<&str>) -> Result<()> {
 
     // Ensure background daemon is running for local DNS and port forwarding
     crate::commands::daemon::ensure_daemon_running();
+    crate::commands::menu_cmd::ensure_menu_bar_running();
 
     println!("\nRun \x1b[1;34mnorb shell {}\x1b[0m to enter the machine.", machine.config.name);
     println!("Run \x1b[1;32mdocker ps\x1b[0m (or \x1b[1;32mnorb docker setup\x1b[0m) to control containers.");

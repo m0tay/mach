@@ -91,6 +91,10 @@ pub async fn run(welcome: bool) -> Result<()> {
     let _ = crate::tls::ensure_tls_cert(&cfg.data_dir);
     println!("    \x1b[1;32m✓\x1b[0m Local wildcard TLS certificates generated (*.norb.local)");
 
+    // 5e. Apple menu bar status item
+    crate::commands::menu_cmd::ensure_menu_bar_running();
+    println!("    \x1b[1;32m✓\x1b[0m Native Apple menu bar status item auto-started ( Norb)");
+
     if welcome {
         println!("\n\x1b[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
         println!(" \x1b[1;32m🎉 Everything is Ready! Here is your quick tour:\x1b[0m");
@@ -113,11 +117,11 @@ pub async fn run(welcome: bool) -> Result<()> {
         println!("   \x1b[1;32mopen ~/Norb\x1b[0m");
         println!("   (Your Linux machine files and container volumes are visible right in Finder)");
         println!("\n\x1b[1m6. Activity & Resource Monitor:\x1b[0m");
-        println!("   \x1b[1;32mnorb top\x1b[0m");
+        println!("   \x1b[1;32mnorbctl top\x1b[0m");
         println!("   (Real-time CPU, resident memory, and APFS disk savings)");
         println!("\n\x1b[1m7. Minimal Apple Menu Bar Icon:\x1b[0m");
-        println!("   \x1b[1;32mnorb menu &\x1b[0m");
-        println!("   (A tiny native  status icon in your menu bar with live states & shortcuts)");
+        println!("   \x1b[1;32m Norb\x1b[0m is already active in your macOS menu bar!");
+        println!("   (Click the icon in your menu bar to view live states, IP, and shortcuts)");
         println!("\n\x1b[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n");
     }
 

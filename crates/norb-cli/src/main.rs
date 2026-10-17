@@ -22,87 +22,90 @@ use norb_common::config::NorbConfig;
 use norb_common::machine::MachineState;
 
 fn print_norb_help() {
-    println!(r#"Norb's short "norb" command can be used in 3 ways:
+    println!(r#"Norb's short "norb" daily-driver command:
 
-1. Start a Linux shell.
-   Just run "norb" with no arguments.
+1. Interactive Linux Shell
+   Run "norb" with no arguments to drop into your default Linux machine:
    Usage: norb
 
-2. Run commands on Linux, like "norbctl run".
-   Prefix any command with "norb" to run it in Linux.
+2. Transparent Linux Command Runner
+   Prefix any command with "norb" to execute it directly inside Linux:
    Usage: norb [flags] <command> [args...]
-   Example: norb uname -a
+   Examples:
+     norb uname -a
+     norb apt update
+     norb python3 -V
+     norb -m debian -u root whoami
 
-   The default user and machine will be used, unless specified with flags.
-   For example, to log in to "debian" as root: norb -m debian -u root uname -a
+3. Machine Lifecycle Verbs
+   Start, stop, and list your Linux machines:
+     norb start [machine]
+     norb stop [machine]
+     norb restart [machine]
+     norb shell [machine]
+     norb create [distro]
+     norb delete <machine>
+     norb list / norb ls
+     norb menu
 
-   Use "norbctl run --help" for a list of flags.
-   If you prefer SSH, use "norbctl ssh" for details.
-
-3. Control Linux machines, like "norbctl".
-   Start, stop, and manage Norb and its machines with any "norbctl" subcommand.
-   Usage: norb <subcommand> [args...]
-
-   Use "norbctl --help" for a list of subcommands.
-
-For Docker containers, use the "docker" command. "norb" is for managing Norb and machines."#);
+For the full system control plane, Kubernetes, Docker, activity monitor, and diagnostics, use "norbctl":
+  norbctl top         # Live APFS & system monitor
+  norbctl info <name> # Detailed machine info
+  norbctl ssh <name>  # Display SSH connection details
+  norbctl k8s         # Manage local Kubernetes cluster
+  norbctl doctor      # System diagnostics
+  norbctl --help      # All control plane commands"#);
 }
 
 fn print_norbctl_help() {
-    println!(r#"Use and manage Norb and its machines.
+    println!(r#"Norb Control Plane (norbctl) — System administration and management.
 
-The listed commands can be used with either "norbctl" or "norb".
-
-You can also prefix commands with "norb" to run them on Linux. For example:
-    norb uname -a
-will run "uname -a" on macOS, and is equivalent to:
-    norbctl run uname -a
-
-In this mode, the default user and machine will be used.
+Use "norbctl" for configuring, monitoring, and managing your Norb virtualization environment.
+For daily Linux shell and transparent command execution, use "norb".
 
 Usage:
   norbctl [command]
 
-Linux machines:
-  clone       Clone a machine
-  code        Open VS Code connected to a machine
-  create      Create a new machine
-  default     Get or set the default machine
-  delete      Delete a machine
-  export      Export a machine to a file
-  import      Import a machine from a file
-  info        Get info about a machine
-  list        List machines
-  logs        Show logs for a machine
-  mount       Mount or open machine filesystem in Finder
-  pull        Copy files from Linux
-  push        Copy files to Linux
-  rename      Rename a machine
-  restart     Restart a machine
-  run         Run command on Linux
-  ssh         Show SSH details
-
-Containers:
-  debug       Debug a Docker container with extra tools
-  docker      Extension commands for Docker
-  k8s         Manage local Kubernetes cluster
-
-General:
-  config      Change Norb settings
-  daemon      Manage background DNS and port forwarding daemon
-  dns         Configure or show macOS local DNS (*.norb.local)
-  doctor      Check if Norb is properly configured and in control
+Machine Management:
+  create      Create a new Linux machine
+  list        List all machines (alias: ls)
   start       Start Norb or a machine
-  status      Check whether Norb is running
   stop        Stop Norb or a machine
-  top         Show a live activity monitor
+  restart     Restart a machine
+  delete      Delete a machine
+  info        Get detailed info about a machine
+  default     Get or set the default machine
+  clone       Clone a machine (APFS instant clone)
+  rename      Rename a machine
+  export      Export machine disk to a file
+  import      Import machine from a raw disk file
+  mount       Mount or open machine filesystem in macOS Finder
+  code        Open VS Code connected to a machine
+  logs        Show boot and system logs for a machine
+  push        Copy files to Linux
+  pull        Copy files from Linux
+  ssh         Show SSH connection details (host, port, keys)
+
+Containers & Kubernetes:
+  k8s         Manage local Kubernetes (K3s) cluster (enable, disable, status)
+  docker      Manage Docker CLI integration and legacy sockets
+  debug       Debug a Docker container with extra tools
+
+System & Infrastructure:
+  top         Live activity and resource monitor (CPU, Memory, APFS CoW disk)
+  status      Check whether Norb and machines are running
+  doctor      Verify hypervisor entitlements, network, and system health
+  config      View or modify Norb configuration (~/.norb/config.yaml)
+  daemon      Manage background DNS (*.norb.local) and port forwarder
+  dns         Configure macOS native DNS resolver
+  tls         Manage local wildcard TLS certificates (*.norb.local)
+  menu        Launch native macOS menu bar status item ( Norb)
+  setup       Run initial onboarding and environment setup
   version     Show Norb version
 
 Flags:
   -h, --help      help for norbctl
-  -v, --verbose   enable verbose debug logging
-
-Use "norbctl [command] --help" for more information about a command."#);
+  -v, --verbose   enable verbose debug logging"#);
 }
 
 #[tokio::main]
@@ -123,6 +126,8 @@ async fn main() -> Result<()> {
 
         // Smart 'norb' zero-args behavior:
         let cfg = NorbConfig::load()?;
+        commands::menu_cmd::ensure_menu_bar_running();
+
         let machines = commands::load_all_machines(&cfg.machines_dir)?;
         if machines.is_empty() {
             println!("No machines found. Welcome to Norb! Starting initial environment setup...\n");
@@ -164,25 +169,45 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Case 2: Check if args should be transparently forwarded to `run`
-    let known_subcommands = [
-        "clone", "create", "list", "ls", "start", "stop", "restart", "delete",
-        "default", "export", "import", "rename", "shell", "run", "info",
-        "status", "top", "logs", "ssh", "push", "pull", "docker", "daemon",
-        "dns", "doctor", "config", "version", "boot", "run-vm", "debug",
-        "mount", "code", "k8s", "link", "tls", "completion", "menu", "setup", "help",
-        "--help", "-h", "--version", "-V",
-    ];
-
+    // Case 2: Subcommand routing
     let mut effective_args = raw_args.clone();
     let first_arg = &raw_args[1];
 
-    if !known_subcommands.contains(&first_arg.as_str())
-        && first_arg != "-v"
-        && first_arg != "--verbose"
-    {
-        // Synthesize `norb run <args...>`
-        effective_args.insert(1, "run".to_string());
+    if bin_name == "norb" {
+        // In `norb`, only basic machine verbs are intercepted locally;
+        // everything else (info, top, logs, ps, uname, apt...) transparently runs in Linux!
+        let norb_machine_commands = [
+            "start", "stop", "restart", "shell", "create", "delete", "list", "ls",
+            "menu", "run", "setup", "completion", "boot", "run-vm", "help", "--help", "-h", "--version", "-V",
+        ];
+
+        if !norb_machine_commands.contains(&first_arg.as_str())
+            && first_arg != "-v"
+            && first_arg != "--verbose"
+            && !first_arg.starts_with("-m")
+            && !first_arg.starts_with("--machine")
+            && !first_arg.starts_with("-u")
+            && !first_arg.starts_with("--user")
+        {
+            effective_args.insert(1, "run".to_string());
+        }
+    } else {
+        // In `norbctl`, all control plane commands are recognized
+        let norbctl_commands = [
+            "clone", "create", "list", "ls", "start", "stop", "restart", "delete",
+            "default", "export", "import", "rename", "shell", "run", "info",
+            "status", "top", "logs", "ssh", "push", "pull", "docker", "daemon",
+            "dns", "doctor", "config", "version", "boot", "run-vm", "debug",
+            "mount", "code", "k8s", "link", "tls", "completion", "menu", "setup", "help",
+            "--help", "-h", "--version", "-V",
+        ];
+
+        if !norbctl_commands.contains(&first_arg.as_str())
+            && first_arg != "-v"
+            && first_arg != "--verbose"
+        {
+            effective_args.insert(1, "run".to_string());
+        }
     }
 
     let cli = Cli::parse_from(effective_args);
@@ -252,7 +277,8 @@ async fn main() -> Result<()> {
             if sync {
                 commands::ssh::sync().await?;
             } else {
-                commands::ssh::run(name.as_deref(), &args, details).await?;
+                let show_details = details || bin_name == "norbctl";
+                commands::ssh::run(name.as_deref(), &args, show_details).await?;
             }
         }
         Commands::Logs {
