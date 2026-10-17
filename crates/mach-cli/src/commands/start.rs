@@ -47,6 +47,25 @@ fn generate_mac(machine_id: &uuid::Uuid) -> (String, String) {
     (full_mac, lease_mac)
 }
 
+/// RAII guard ensuring background hypervisor child process is killed if startup fails or is cancelled.
+struct VmmChildGuard {
+    pid: u32,
+    pid_file: PathBuf,
+    started_successfully: bool,
+}
+
+impl Drop for VmmChildGuard {
+    fn drop(&mut self) {
+        if !self.started_successfully {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(self.pid as i32),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+            let _ = fs::remove_file(&self.pid_file);
+        }
+    }
+}
+
 static LEASE_CACHE: Mutex<Option<(SystemTime, String, u64, u64)>> = Mutex::new(None);
 
 /// Get the latest lease expiration timestamps currently recorded for a machine's MAC and name.
@@ -117,6 +136,11 @@ fn lookup_dhcp_lease(
         return None;
     };
 
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
     let blocks: Vec<&str> = content.split('}').collect();
     let mut best_mac_lease: Option<(u64, IpAddr)> = None;
     let mut best_name_lease: Option<(u64, IpAddr)> = None;
@@ -145,12 +169,16 @@ fn lookup_dhcp_lease(
         }
 
         if let Some(ip) = ip_opt {
-            if matches_pattern && (prev_mac_ts == 0 || lease_time > prev_mac_ts) {
+            // For deterministic hardware MAC address: any unexpired lease or new lease belongs to this machine
+            let mac_valid = (lease_time > now) || (prev_mac_ts == 0) || (lease_time >= prev_mac_ts);
+            if matches_pattern && mac_valid {
                 if best_mac_lease.is_none() || lease_time > best_mac_lease.unwrap().0 {
                     best_mac_lease = Some((lease_time, ip));
                 }
             }
-            if matches_name && (prev_name_ts == 0 || lease_time > prev_name_ts) {
+            // For machine name fallback
+            let name_valid = (prev_name_ts == 0 || lease_time > prev_name_ts) && (lease_time > now || prev_name_ts == 0);
+            if matches_name && name_valid {
                 if best_name_lease.is_none() || lease_time > best_name_lease.unwrap().0 {
                     best_name_lease = Some((lease_time, ip));
                 }
@@ -207,24 +235,39 @@ pub async fn run_ext(name: Option<&str>, to_stderr: bool) -> Result<()> {
     let mut machine = find_machine(&cfg.machines_dir, &target_name)?
         .with_context(|| format!("machine '{target_name}' not found"))?;
 
-    // Check if already running by checking PID
-    if let Some(pid) = machine.pid {
-        if nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None).is_ok() {
-            out_ln!("Machine \x1b[1m{}\x1b[0m is already running (PID: {}).", machine.config.name, pid);
+    let machine_dir = cfg.machines_dir.join(&machine.config.name);
+    fs::create_dir_all(&machine_dir)?;
+
+    let pid_file = machine_dir.join("pid");
+    let check_pid = machine.pid.or_else(|| {
+        fs::read_to_string(&pid_file).ok().and_then(|s| s.trim().parse::<u32>().ok())
+    });
+
+    if let Some(pid) = check_pid {
+        let raw_pid = nix::unistd::Pid::from_raw(pid as i32);
+        if nix::sys::signal::kill(raw_pid, None).is_ok() {
             if let Some(ip) = machine.ip_address {
-                out_ln!("  IP Address:  \x1b[1;34m{}\x1b[0m", ip);
-                out_ln!("  SSH Command: \x1b[1;32mssh root@{}\x1b[0m", ip);
+                if tokio::net::TcpStream::connect((ip, 22)).await.is_ok() {
+                    machine.state = MachineState::Running;
+                    machine.pid = Some(pid);
+                    let _ = save_machine(&cfg.machines_dir, &machine);
+                    out_ln!("Machine \x1b[1m{}\x1b[0m is already running (PID: {}).", machine.config.name, pid);
+                    out_ln!("  IP Address:  \x1b[1;34m{}\x1b[0m", ip);
+                    out_ln!("  SSH Command: \x1b[1;32mssh root@{}\x1b[0m", ip);
+                    return Ok(());
+                }
             }
-            return Ok(());
+            // Stale or stuck orphan process holding disk/EFI lock, kill it cleanly
+            let _ = nix::sys::signal::kill(raw_pid, nix::sys::signal::Signal::SIGKILL);
+            sleep(Duration::from_millis(200)).await;
         }
+        let _ = fs::remove_file(&pid_file);
     }
 
     let (mac_str, lease_pattern) = generate_mac(&machine.id);
 
     out_ln!("\x1b[1;36m➜\x1b[0m Booting real Linux VM \x1b[1m{}\x1b[0m on Apple Silicon...", machine.config.name);
 
-    let machine_dir = cfg.machines_dir.join(&machine.config.name);
-    fs::create_dir_all(&machine_dir)?;
     let log_file = fs::File::create(machine_dir.join("vm.log"))?;
 
     let disk_path = machine_dir.join("disk.raw");
@@ -284,90 +327,132 @@ pub async fn run_ext(name: Option<&str>, to_stderr: bool) -> Result<()> {
     ];
     let (prev_mac_ts, prev_name_ts) = get_machine_lease_timestamps(&machine.config.name, &patterns);
 
-    let child = cmd.spawn()
+    let mut child = cmd.spawn()
         .with_context(|| "failed to spawn background VMM process")?;
 
     let child_pid = child.id();
     fs::write(machine_dir.join("pid"), child_pid.to_string())?;
 
-    out_pr!("  Waiting for network & DHCP lease...");
-
-    let mut assigned_ip = None;
-    let mut last_leases_mtime = None;
-
-    for _ in 0..150 {
-        sleep(Duration::from_millis(200)).await;
-        let current_mtime = fs::metadata("/var/db/dhcpd_leases").ok().and_then(|m| m.modified().ok());
-        if current_mtime.is_some() && current_mtime == last_leases_mtime {
-            continue;
-        }
-        last_leases_mtime = current_mtime;
-        if let Some(ip) = lookup_dhcp_lease(&machine.config.name, &patterns, prev_mac_ts, prev_name_ts) {
-            assigned_ip = Some(ip);
-            break;
-        }
-    }
-
-    out_ln!();
-
-    let ip = match assigned_ip {
-        Some(ip) => ip,
-        None => {
-            let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(child_pid as i32), nix::sys::signal::Signal::SIGTERM);
-            bail!("machine started (PID: {child_pid}), but did not acquire a DHCP lease in time. Check {} for details.", machine_dir.join("vm.log").display());
-        }
-    };
-
-    // Probe TCP port 22 with 100ms backoff before SSH auth loop to avoid spawning failed child processes
-    out_pr!("  Waiting for SSH service to become ready...");
-
-    let mut port_open = false;
-    for _ in 0..600 {
-        if tokio::net::TcpStream::connect((ip, 22)).await.is_ok() {
-            port_open = true;
-            break;
-        }
-        sleep(Duration::from_millis(100)).await;
-    }
-
-    if !port_open {
-        let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(child_pid as i32), nix::sys::signal::Signal::SIGTERM);
-        bail!("machine acquired IP {ip}, but port 22 did not open within 60 seconds.");
-    }
-
-    let mut ssh_ready = false;
     let base_ssh = crate::ssh::mach_ssh_args();
 
-    for _ in 0..60 {
-        let mut test_args = base_ssh.clone();
-        test_args.extend([
-            "-o".to_string(), "ConnectTimeout=2".to_string(),
-            format!("root@{ip}"),
-            "true".to_string(),
-        ]);
-        let test_ssh = std::process::Command::new("ssh")
-            .args(&test_args)
-            .status();
-        if let Ok(st) = test_ssh {
-            if st.success() {
-                ssh_ready = true;
-                break;
-            }
-        }
-        sleep(Duration::from_millis(500)).await;
-    }
-    out_ln!();
+    let mut guard = VmmChildGuard {
+        pid: child_pid,
+        pid_file: machine_dir.join("pid"),
+        started_successfully: false,
+    };
 
-    if !ssh_ready {
-        let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(child_pid as i32), nix::sys::signal::Signal::SIGTERM);
-        bail!("machine acquired IP {ip}, but SSH service did not become ready within 60 seconds.");
-    }
+    let log_path = machine_dir.join("vm.log");
+
+    let ip = tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            out_ln!("\n\x1b[1;33m➜\x1b[0m Startup cancelled by user (Ctrl-C). Hypervisor terminated.");
+            drop(guard);
+            bail!("boot cancelled by user");
+        }
+        res = async {
+            out_pr!("  Waiting for network & DHCP lease...");
+
+            let mut assigned_ip = None;
+            for _ in 0..150 {
+                if let Ok(Some(status)) = child.try_wait() {
+                    let log_tail = fs::read_to_string(&log_path)
+                        .unwrap_or_default()
+                        .lines()
+                        .rev()
+                        .take(10)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    bail!("hypervisor process exited unexpectedly with {status}.\nLog details:\n{log_tail}");
+                }
+                if let Some(ip) = lookup_dhcp_lease(&machine.config.name, &patterns, prev_mac_ts, prev_name_ts) {
+                    assigned_ip = Some(ip);
+                    break;
+                }
+                sleep(Duration::from_millis(200)).await;
+            }
+
+            out_ln!();
+
+            let ip = match assigned_ip {
+                Some(ip) => ip,
+                None => {
+                    bail!("machine started (PID: {child_pid}), but did not acquire a DHCP lease in time. Check {} for details.", log_path.display());
+                }
+            };
+
+            // Probe TCP port 22 with 100ms backoff before SSH auth loop to avoid spawning failed child processes
+            out_pr!("  Waiting for SSH service to become ready...");
+
+            let mut port_open = false;
+            for _ in 0..600 {
+                if let Ok(Some(status)) = child.try_wait() {
+                    let log_tail = fs::read_to_string(&log_path)
+                        .unwrap_or_default()
+                        .lines()
+                        .rev()
+                        .take(10)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    bail!("hypervisor process exited unexpectedly with {status}.\nLog details:\n{log_tail}");
+                }
+                if tokio::net::TcpStream::connect((ip, 22)).await.is_ok() {
+                    port_open = true;
+                    break;
+                }
+                sleep(Duration::from_millis(100)).await;
+            }
+
+            if !port_open {
+                bail!("machine acquired IP {ip}, but port 22 did not open within 60 seconds.");
+            }
+
+            let mut ssh_ready = false;
+
+            for _ in 0..60 {
+                if let Ok(Some(status)) = child.try_wait() {
+                    bail!("hypervisor process exited unexpectedly with {status}.");
+                }
+                let mut test_args = base_ssh.clone();
+                test_args.extend([
+                    "-o".to_string(), "ConnectTimeout=2".to_string(),
+                    format!("root@{ip}"),
+                    "true".to_string(),
+                ]);
+                let test_ssh = std::process::Command::new("ssh")
+                    .args(&test_args)
+                    .status();
+                if let Ok(st) = test_ssh {
+                    if st.success() {
+                        ssh_ready = true;
+                        break;
+                    }
+                }
+                sleep(Duration::from_millis(500)).await;
+            }
+            out_ln!();
+
+            if !ssh_ready {
+                bail!("machine acquired IP {ip}, but SSH service did not become ready within 60 seconds.");
+            }
+
+            Ok::<IpAddr, anyhow::Error>(ip)
+        } => {
+            res?
+        }
+    };
 
     machine.state = MachineState::Running;
     machine.ip_address = Some(ip);
     machine.pid = Some(child_pid);
 
     save_machine(&cfg.machines_dir, &machine)?;
+    guard.started_successfully = true;
 
     // Install host bridge CLI `mac` inside guest
     if let Err(e) = crate::bridge::install_guest_mac_cli(ip) {

@@ -141,7 +141,12 @@ int vz_start_vm(
                 [fsConfig setShare:share];
                 [dirSharing addObject:fsConfig];
 
-                NSLog(@"[mach-vmm] VirtioFS shared folder attached: %s (tag: mach_share)", shared_dir_path);
+                // Also attach legacy tag "norb_share" so existing VMs with /etc/fstab don't block systemd boot
+                VZVirtioFileSystemDeviceConfiguration *legacyFsConfig = [[VZVirtioFileSystemDeviceConfiguration alloc] initWithTag:@"norb_share"];
+                [legacyFsConfig setShare:share];
+                [dirSharing addObject:legacyFsConfig];
+
+                NSLog(@"[mach-vmm] VirtioFS shared folder attached: %s (tags: mach_share, norb_share)", shared_dir_path);
             }
         }
 

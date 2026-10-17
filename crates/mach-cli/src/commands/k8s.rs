@@ -115,7 +115,8 @@ pub async fn enable() -> Result<()> {
     }
 
     let m = find_machine(&cfg.machines_dir, &vm_name)?.unwrap();
-    if m.state != MachineState::Running {
+    let is_alive = m.state == MachineState::Running && m.pid.map(|p| nix::sys::signal::kill(nix::unistd::Pid::from_raw(p as i32), None).is_ok()).unwrap_or(false);
+    if !is_alive {
         crate::commands::start::run(Some(&vm_name)).await?;
     }
 

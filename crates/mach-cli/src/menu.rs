@@ -620,7 +620,7 @@ end tell"#,
     }
 
     pub fn run_menu_bar() -> Result<()> {
-        println!("\x1b[1;36m➜\x1b[0m Starting mach menu bar status item (\x1b[1m mach\x1b[0m)...");
+        println!("\x1b[1;36m➜\x1b[0m Starting mach menu bar status item (\x1b[1mmach\x1b[0m)...");
 
         unsafe {
             let pool = objc_autoreleasePoolPush();
@@ -723,7 +723,7 @@ end tell"#,
                 msg_send_1(
                     status_item,
                     sel_registerName(b"setTitle:\0".as_ptr() as _),
-                    ns_string(" mach"),
+                    ns_string("mach"),
                 );
             }
 
