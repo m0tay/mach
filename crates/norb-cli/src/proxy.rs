@@ -136,11 +136,23 @@ pub fn decode_chunked_body(raw: &[u8]) -> Vec<u8> {
 
 /// Container routing target
 #[derive(Debug, Clone)]
-struct RouteTarget {
-    name: String,
-    compose_service: Option<String>,
-    compose_project: Option<String>,
-    port: u16,
+pub struct RouteTarget {
+    pub name: String,
+    pub compose_service: Option<String>,
+    pub compose_project: Option<String>,
+    pub port: u16,
+    pub ports: Vec<u16>,
+}
+
+impl RouteTarget {
+    /// Return candidate ports for HTTP probing or routing.
+    pub fn candidate_ports(&self) -> Vec<u16> {
+        if self.ports.is_empty() {
+            vec![self.port]
+        } else {
+            self.ports.clone()
+        }
+    }
 }
 
 pub async fn run_reverse_proxy(docker_sock: &Path, machines_dir: &Path) -> Result<()> {
@@ -228,9 +240,9 @@ async fn handle_proxy_conn(mut client: TcpStream, docker_sock: &Path, machines_d
         }
     };
 
-    // Find matching container route
+    // Find matching container route with auto-detection probe or override
     let routes = fetch_container_routes(docker_sock).await.unwrap_or_default();
-    let matched_port = find_target_port(&host, &routes);
+    let matched_port = resolve_target_port(&host, &routes, guest_ip).await;
 
     let target_port = match matched_port {
         Some(p) => p,
@@ -260,42 +272,212 @@ async fn handle_proxy_conn(mut client: TcpStream, docker_sock: &Path, machines_d
     Ok(())
 }
 
-fn parse_host_header(headers: &str) -> Option<String> {
+/// Parse Host header from incoming HTTP request.
+/// Preserves '@<port>' override if present while stripping proxy port (e.g. ':8080').
+pub fn parse_host_header(headers: &str) -> Option<String> {
     for line in headers.lines() {
         if line.to_ascii_lowercase().starts_with("host:") {
-            let val = line[5..].trim();
-            // Strip port if present (e.g. host:8080)
-            let host_only = val.split(':').next().unwrap_or(val).trim();
-            return Some(host_only.to_ascii_lowercase());
+            let mut val = line[5..].trim();
+            if let Some(stripped) = val.strip_prefix("http://").or_else(|| val.strip_prefix("https://")) {
+                val = stripped;
+            }
+            if let Some(pos) = val.find('/') {
+                val = &val[..pos];
+            }
+
+            let host_only = if let Some(at_idx) = val.find('@') {
+                let domain_part = &val[..at_idx];
+                let after_at = &val[at_idx + 1..];
+                let digits: String = after_at.chars().take_while(|c| c.is_ascii_digit()).collect();
+                let rest = &after_at[digits.len()..];
+                let rest_clean = rest.split(':').next().unwrap_or(rest);
+                format!("{domain_part}@{digits}{rest_clean}")
+            } else {
+                val.split(':').next().unwrap_or(val).to_string()
+            };
+            return Some(host_only.trim().to_ascii_lowercase());
         }
     }
     None
 }
 
-fn find_target_port(host: &str, routes: &[RouteTarget]) -> Option<u16> {
-    let clean_host = host.trim_end_matches(".norb.local").trim_end_matches(".local");
+/// Extract clean domain and optional '@<port>' override from host string.
+/// Handles forms like 'http://app.norb.local@8080', 'app.norb.local@8080', and 'app.norb.local:8080'.
+pub fn parse_host_and_override_port(host: &str) -> (String, Option<u16>) {
+    let mut h = host.trim();
+    if let Some(stripped) = h.strip_prefix("http://").or_else(|| h.strip_prefix("https://")) {
+        h = stripped;
+    }
+    if let Some(pos) = h.find('/') {
+        h = &h[..pos];
+    }
+    if let Some(at_idx) = h.find('@') {
+        let before = &h[..at_idx];
+        let after = &h[at_idx + 1..];
+        let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let rest = &after[digits.len()..];
+        if let Ok(port) = digits.parse::<u16>() {
+            let rest_domain = rest.trim_start_matches(|c: char| c.is_ascii_digit() || c == ':');
+            let domain = format!("{}{}", before, rest_domain);
+            return (domain, Some(port));
+        }
+    }
+
+    let domain = h.split(':').next().unwrap_or(h).to_string();
+    (domain, None)
+}
+
+/// Strip `.norb.local` or `.local` domain suffix case-insensitively.
+pub fn strip_domain_suffix(domain: &str) -> &str {
+    let lower = domain.to_ascii_lowercase();
+    if lower.ends_with(".norb.local") {
+        &domain[..domain.len() - 11]
+    } else if lower.ends_with(".local") {
+        &domain[..domain.len() - 6]
+    } else {
+        domain
+    }
+}
+
+/// Find matching container route target by domain name or Docker Compose service/project.
+pub fn find_target_route<'a>(domain: &str, routes: &'a [RouteTarget]) -> Option<&'a RouteTarget> {
+    let clean_host = strip_domain_suffix(domain);
 
     for r in routes {
-        // Direct container name match
-        if r.name.eq_ignore_ascii_case(clean_host) {
-            return Some(r.port);
+        // Direct container name match (handling optional leading '/')
+        let raw_name = r.name.trim_start_matches('/');
+        if raw_name.eq_ignore_ascii_case(clean_host) {
+            return Some(r);
         }
 
-        // Docker Compose service.project match (e.g. web.myproject)
+        // Docker Compose multi-level domain routing:
+        // 1. <service>.<project>.norb.local (clean_host == <service>.<project>)
+        // 2. <project>-<service>.norb.local (clean_host == <project>-<service>)
         if let (Some(svc), Some(proj)) = (&r.compose_service, &r.compose_project) {
-            let compose_pattern = format!("{}.{}", svc.to_ascii_lowercase(), proj.to_ascii_lowercase());
-            if compose_pattern == clean_host {
-                return Some(r.port);
+            let pattern1 = format!("{}.{}", svc, proj);
+            let pattern2 = format!("{}-{}", proj, svc);
+            if clean_host.eq_ignore_ascii_case(&pattern1) || clean_host.eq_ignore_ascii_case(&pattern2) {
+                return Some(r);
             }
         }
     }
 
     // Default to the first route if only one container is running
     if routes.len() == 1 {
-        return Some(routes[0].port);
+        return Some(&routes[0]);
     }
 
     None
+}
+
+/// Synchronously look up target container port from Host header.
+/// Supports '@<port>' override syntax (e.g. `http://app.norb.local@8080`), routing directly to it.
+pub fn find_target_port(host: &str, routes: &[RouteTarget]) -> Option<u16> {
+    let (domain, override_port) = parse_host_and_override_port(host);
+
+    if let Some(port) = override_port {
+        return Some(port);
+    }
+
+    let target = find_target_route(&domain, routes)?;
+    Some(target.port)
+}
+
+/// Resolve target container port with asynchronous HTTP candidate port probing.
+/// - If '@<port>' is specified in host, routes directly to it without probing.
+/// - When a container publishes multiple ports and no override is provided,
+///   probes candidate ports asynchronously (HTTP HEAD / with 50ms timeout)
+///   and routes traffic to the first responsive port.
+pub async fn resolve_target_port(
+    host: &str,
+    routes: &[RouteTarget],
+    guest_ip: std::net::IpAddr,
+) -> Option<u16> {
+    let (domain, override_port) = parse_host_and_override_port(host);
+
+    if let Some(port) = override_port {
+        return Some(port);
+    }
+
+    let target = find_target_route(&domain, routes)?;
+    let candidates = target.candidate_ports();
+    if candidates.len() > 1 {
+        if let Some(probe_port) = probe_candidate_ports(guest_ip, &candidates).await {
+            return Some(probe_port);
+        }
+    }
+
+    Some(target.port)
+}
+
+/// Probe candidate TCP ports asynchronously using HTTP HEAD / with 50ms timeout.
+/// Returns the first responsive port, or None if none responded.
+pub async fn probe_candidate_ports(guest_ip: std::net::IpAddr, ports: &[u16]) -> Option<u16> {
+    let mut unique_ports = Vec::new();
+    for &p in ports {
+        if p > 0 && !unique_ports.contains(&p) {
+            unique_ports.push(p);
+        }
+    }
+
+    if unique_ports.is_empty() {
+        return None;
+    }
+    if unique_ports.len() == 1 {
+        return Some(unique_ports[0]);
+    }
+
+    let mut set = tokio::task::JoinSet::new();
+    for &port in &unique_ports {
+        let addr = SocketAddr::new(guest_ip, port);
+        set.spawn(async move {
+            if probe_http_port(addr).await {
+                Some(port)
+            } else {
+                None
+            }
+        });
+    }
+
+    while let Some(res) = set.join_next().await {
+        if let Ok(Some(port)) = res {
+            set.abort_all();
+            return Some(port);
+        }
+    }
+
+    None
+}
+
+/// Probe a single address with HTTP HEAD / within 50ms.
+async fn probe_http_port(addr: SocketAddr) -> bool {
+    let probe = async {
+        let mut stream = TcpStream::connect(addr).await.ok()?;
+        stream
+            .write_all(b"HEAD / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .await
+            .ok()?;
+        let mut buf = [0u8; 64];
+        let mut total_read = 0;
+        while total_read < 5 {
+            let n = stream.read(&mut buf[total_read..]).await.ok()?;
+            if n == 0 {
+                break;
+            }
+            total_read += n;
+        }
+        if total_read >= 5 && buf[..total_read].starts_with(b"HTTP/") {
+            Some(())
+        } else {
+            None
+        }
+    };
+
+    tokio::time::timeout(tokio::time::Duration::from_millis(50), probe)
+        .await
+        .ok()
+        .flatten()
+        .is_some()
 }
 
 async fn fetch_container_routes(docker_sock: &Path) -> Result<Vec<RouteTarget>> {
@@ -371,22 +553,45 @@ async fn fetch_container_routes(docker_sock: &Path) -> Result<Vec<RouteTarget>> 
                 .and_then(|s| s.as_str())
                 .map(String::from);
 
-            // Find exposed or published port
-            let mut port = 80;
+            // Collect all published or private TCP ports
+            let mut candidate_ports = Vec::new();
             if let Some(ports) = c.get("Ports").and_then(|p| p.as_array()) {
                 for p in ports {
-                    if let Some(priv_port) = p.get("PrivatePort").and_then(|v| v.as_u64()) {
-                        port = priv_port as u16;
-                        break;
+                    let p_type = p.get("Type").and_then(|t| t.as_str()).unwrap_or("tcp");
+                    if p_type.eq_ignore_ascii_case("tcp") {
+                        let pub_port = p
+                            .get("PublicPort")
+                            .and_then(|v| v.as_u64())
+                            .filter(|&v| v > 0 && v <= 65535);
+                        let priv_port = p
+                            .get("PrivatePort")
+                            .and_then(|v| v.as_u64())
+                            .filter(|&v| v > 0 && v <= 65535);
+
+                        // If published to host, prefer the PublicPort
+                        if let Some(port) = pub_port {
+                            let port_u16 = port as u16;
+                            if !candidate_ports.contains(&port_u16) {
+                                candidate_ports.push(port_u16);
+                            }
+                        } else if let Some(port) = priv_port {
+                            let port_u16 = port as u16;
+                            if !candidate_ports.contains(&port_u16) {
+                                candidate_ports.push(port_u16);
+                            }
+                        }
                     }
                 }
             }
+
+            let primary_port = candidate_ports.first().copied().unwrap_or(80);
 
             routes.push(RouteTarget {
                 name: raw_name,
                 compose_service,
                 compose_project,
-                port,
+                port: primary_port,
+                ports: candidate_ports,
             });
         }
     }
@@ -446,6 +651,12 @@ mod tests {
         let headers_lowercase = "get / http/1.1\r\nhost: backend.local\r\n\r\n";
         assert_eq!(parse_host_header(headers_lowercase), Some("backend.local".to_string()));
 
+        let headers_override = "GET / HTTP/1.1\r\nHost: app.norb.local@8080\r\n\r\n";
+        assert_eq!(parse_host_header(headers_override), Some("app.norb.local@8080".to_string()));
+
+        let headers_url = "GET / HTTP/1.1\r\nHost: http://app.norb.local@8080\r\n\r\n";
+        assert_eq!(parse_host_header(headers_url), Some("app.norb.local@8080".to_string()));
+
         let no_host = "GET / HTTP/1.1\r\nUser-Agent: curl\r\n\r\n";
         assert_eq!(parse_host_header(no_host), None);
     }
@@ -465,19 +676,105 @@ mod tests {
                 compose_service: Some("web".to_string()),
                 compose_project: Some("proj".to_string()),
                 port: 3000,
+                ports: vec![3000],
             },
             RouteTarget {
                 name: "db".to_string(),
                 compose_service: None,
                 compose_project: None,
                 port: 5432,
+                ports: vec![5432],
             },
         ];
 
+        // Direct container name
         assert_eq!(find_target_port("web-app.norb.local", &routes), Some(3000));
-        assert_eq!(find_target_port("web.proj.norb.local", &routes), Some(3000));
         assert_eq!(find_target_port("db.norb.local", &routes), Some(5432));
         assert_eq!(find_target_port("unknown.norb.local", &routes), None);
+
+        // Docker Compose: <service>.<project>.norb.local
+        assert_eq!(find_target_port("web.proj.norb.local", &routes), Some(3000));
+        assert_eq!(find_target_port("WEB.PROJ.norb.local", &routes), Some(3000));
+
+        // Docker Compose: <project>-<service>.norb.local
+        assert_eq!(find_target_port("proj-web.norb.local", &routes), Some(3000));
+        assert_eq!(find_target_port("PROJ-WEB.norb.local", &routes), Some(3000));
+
+        // Port override syntax: @<port>
+        assert_eq!(find_target_port("http://app.norb.local@8080", &routes), Some(8080));
+        assert_eq!(find_target_port("app.norb.local@8080", &routes), Some(8080));
+        assert_eq!(find_target_port("web-app.norb.local@9000", &routes), Some(9000));
+        assert_eq!(find_target_port("web.proj.norb.local@9000", &routes), Some(9000));
+        assert_eq!(find_target_port("proj-web.norb.local@9000", &routes), Some(9000));
+    }
+
+    #[tokio::test]
+    async fn test_probe_candidate_ports() {
+        // Start a mock HTTP server on an ephemeral port
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let open_port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 128];
+                    let _ = socket.read(&mut buf).await;
+                    let resp = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                    let _ = socket.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+
+        let closed_port = 59998;
+        let ip = std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
+
+        // Candidate ports with closed port first, then open HTTP port
+        let ports = vec![closed_port, open_port];
+        let responsive = probe_candidate_ports(ip, &ports).await;
+        assert_eq!(responsive, Some(open_port));
+
+        // When all candidate ports fail to respond
+        let dead_ports = vec![59997, 59998];
+        let dead_res = probe_candidate_ports(ip, &dead_ports).await;
+        assert_eq!(dead_res, None);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_target_port_probe_and_override() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let open_port = listener.local_addr().unwrap().port();
+
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 128];
+                    let _ = socket.read(&mut buf).await;
+                    let resp = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                    let _ = socket.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+
+        let closed_port = 59996;
+        let ip = std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
+
+        let routes = vec![RouteTarget {
+            name: "multi-svc".to_string(),
+            compose_service: Some("web".to_string()),
+            compose_project: Some("myapp".to_string()),
+            port: closed_port,
+            ports: vec![closed_port, open_port],
+        }];
+
+        // Auto-detection probe chooses open_port
+        let resolved = resolve_target_port("web.myapp.norb.local", &routes, ip).await;
+        assert_eq!(resolved, Some(open_port));
+
+        let resolved_kebab = resolve_target_port("myapp-web.norb.local", &routes, ip).await;
+        assert_eq!(resolved_kebab, Some(open_port));
+
+        // Port override skips probe and routes directly
+        let overridden = resolve_target_port("web.myapp.norb.local@8081", &routes, ip).await;
+        assert_eq!(overridden, Some(8081));
     }
 }
-
