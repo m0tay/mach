@@ -12,9 +12,11 @@ pub mod delete;
 pub mod dns_cmd;
 pub mod docker;
 pub mod doctor;
+pub mod dump;
 pub mod export_import;
 pub mod info;
 pub mod init;
+pub mod inspect;
 pub mod k8s;
 pub mod link;
 pub mod list;
@@ -46,10 +48,15 @@ use std::path::{Path, PathBuf};
 /// Helper to get the path to a machine's metadata file.
 #[allow(dead_code)]
 pub fn machine_file_path(machines_dir: &Path, name: &str) -> PathBuf {
-    machines_dir.join(name).join("machine.json")
+    let yaml = machines_dir.join(name).join("machine.yaml");
+    if yaml.exists() {
+        yaml
+    } else {
+        machines_dir.join(name).join("machine.json")
+    }
 }
 
-/// Load all machines from the machines directory.
+/// Load all machines from the machines directory (supports both YAML and JSON with auto-migration).
 pub fn load_all_machines(machines_dir: &Path) -> Result<Vec<Machine>> {
     if !machines_dir.exists() {
         return Ok(Vec::new());
@@ -60,12 +67,9 @@ pub fn load_all_machines(machines_dir: &Path) -> Result<Vec<Machine>> {
         .with_context(|| format!("failed to read machines directory: {}", machines_dir.display()))?;
 
     for entry in entries.flatten() {
-        let meta_file = entry.path().join("machine.json");
-        if meta_file.exists() {
-            if let Ok(content) = fs::read_to_string(&meta_file) {
-                if let Ok(m) = serde_json::from_str::<Machine>(&content) {
-                    machines.push(m);
-                }
+        if entry.path().is_dir() {
+            if let Ok(m) = mach_common::machine::load_machine(&entry.path()) {
+                machines.push(m);
             }
         }
     }
@@ -88,14 +92,10 @@ pub fn find_machine(machines_dir: &Path, query: &str) -> Result<Option<Machine>>
     Ok(None)
 }
 
-/// Persist a machine descriptor to disk.
+/// Persist a machine descriptor to disk in YAML format.
 pub fn save_machine(machines_dir: &Path, machine: &Machine) -> Result<()> {
-    let dir = machines_dir.join(&machine.config.name);
-    fs::create_dir_all(&dir)?;
-    let path = dir.join("machine.json");
-    let content = serde_json::to_string_pretty(machine)?;
-    fs::write(path, content)?;
-    Ok(())
+    mach_common::machine::save_machine(machines_dir, machine)
+        .map_err(|e| anyhow::anyhow!("{e}"))
 }
 /// Returns the visible character width of a string in terminal cells, ignoring ANSI escape sequences.
 pub fn visible_width(s: &str) -> usize {

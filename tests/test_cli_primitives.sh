@@ -85,11 +85,33 @@ assert_contains "$CREATE_OUT" "created successfully" "mach create alpine succeed
 LS_OUT=$(mach ls)
 assert_contains "$LS_OUT" "test-alp" "mach ls shows newly created machine"
 
-# 6. Machine metadata info and default
-echo -e "\n${YELLOW}[6/15] Testing machine info and default setting...${NC}"
+# 6. Machine metadata info, inspect, dump, and default
+echo -e "\n${YELLOW}[6/15] Testing machine info, inspect, dump, and default setting...${NC}"
 INFO_OUT=$(mach info test-alp)
 assert_contains "$INFO_OUT" "test-alp" "mach info shows machine name"
 assert_contains "$INFO_OUT" "1024 MiB" "mach info shows allocated memory"
+
+if [ -f "$HOME/.mach/machines/test-alp/machine.yaml" ]; then
+    report_pass "Machine metadata persisted in machine.yaml"
+else
+    report_fail "Machine metadata machine.yaml not found"
+fi
+
+INSPECT_YAML=$(machctl inspect test-alp)
+assert_contains "$INSPECT_YAML" "name: test-alp" "machctl inspect outputs YAML by default"
+assert_contains "$INSPECT_YAML" "hardware:" "machctl inspect includes hardware section"
+
+INSPECT_JSON=$(machctl inspect test-alp --json)
+assert_contains "$INSPECT_JSON" '"name": "test-alp"' "machctl inspect --json outputs valid JSON"
+
+DUMP_YAML=$(machctl dump test-alp)
+assert_contains "$DUMP_YAML" "name: test-alp" "machctl dump outputs YAML by default"
+
+DUMP_JSON=$(machctl dump test-alp --json)
+assert_contains "$DUMP_JSON" '"name": "test-alp"' "machctl dump --json outputs valid JSON"
+
+MACH_INSPECT=$(mach inspect test-alp)
+assert_contains "$MACH_INSPECT" "name: test-alp" "mach inspect works directly"
 
 DEF_OUT=$(mach default test-alp)
 assert_contains "$DEF_OUT" "test-alp" "mach default sets default machine"

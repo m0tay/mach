@@ -239,6 +239,38 @@ pub enum Commands {
         name: Option<String>,
     },
 
+    /// Inspect machine configuration and runtime status (YAML by default, or JSON)
+    Inspect {
+        /// Machine name (defaults to default machine)
+        name: Option<String>,
+
+        /// Output in YAML format (default)
+        #[arg(long)]
+        yaml: bool,
+
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Dump raw machine or system configuration (YAML by default, or JSON)
+    Dump {
+        /// Machine name (defaults to default machine or all if --all)
+        name: Option<String>,
+
+        /// Dump all machines and global configuration
+        #[arg(long)]
+        all: bool,
+
+        /// Output in YAML format (default)
+        #[arg(long)]
+        yaml: bool,
+
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Show overall status of machines and the virtualization engine
     Status,
 

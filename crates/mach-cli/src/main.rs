@@ -75,6 +75,8 @@ Linux machines:
   restart     Restart a machine
   delete      Delete a machine
   info        Get detailed info about a machine
+  inspect     Deep inspection of machine specs, network, and features (YAML/JSON)
+  dump        Dump raw machine or system configuration (YAML/JSON)
   default     Get or set the default machine
   clone       Clone a machine (APFS instant clone)
   rename      Rename a machine
@@ -279,6 +281,7 @@ async fn main() -> Result<()> {
                 "default", "init", "help", "--help", "-h", "version", "--version", "-V",
                 "menu", "run", "setup", "completion", "boot", "run-vm", "update",
                 "info", "status", "logs", "ssh", "push", "pull",
+                "inspect", "dump",
             ];
 
             let cmd_name = &raw_args[idx];
@@ -291,6 +294,7 @@ async fn main() -> Result<()> {
         let machctl_commands = [
             "clone", "create", "list", "ls", "start", "stop", "restart", "delete",
             "default", "export", "import", "rename", "shell", "run", "info",
+            "inspect", "dump",
             "status", "top", "logs", "ssh", "push", "pull", "docker", "daemon",
             "dns", "doctor", "config", "version", "update", "boot", "run-vm", "debug",
             "mount", "code", "k8s", "link", "tls", "completion", "menu", "setup", "init", "help",
@@ -423,6 +427,12 @@ async fn main() -> Result<()> {
         }
         Commands::Info { name } => {
             commands::info::run(name.as_deref()).await?;
+        }
+        Commands::Inspect { name, yaml, json } => {
+            commands::inspect::run(name.as_deref(), yaml, json).await?;
+        }
+        Commands::Dump { name, all, yaml, json } => {
+            commands::dump::run(name.as_deref(), all, yaml, json).await?;
         }
         Commands::Status => {
             commands::status::run().await?;

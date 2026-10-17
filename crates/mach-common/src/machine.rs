@@ -221,15 +221,47 @@ impl Machine {
     }
 }
 
-/// Persist a machine descriptor to disk inside `<machines_dir>/<machine.config.name>/machine.json`
+/// Load a machine descriptor from disk inside `<machine_dir>/machine.yaml` (or fallback `machine.json`).
+/// If a legacy `machine.json` is encountered, it is automatically migrated to `machine.yaml`.
+pub fn load_machine(machine_dir: &Path) -> Result<Machine> {
+    let yaml_path = machine_dir.join("machine.yaml");
+    let json_path = machine_dir.join("machine.json");
+
+    if yaml_path.exists() {
+        let content = std::fs::read_to_string(&yaml_path)?;
+        let m: Machine = serde_yaml::from_str(&content)
+            .map_err(|e| MachError::Machine(format!("failed to parse machine.yaml in {}: {e}", machine_dir.display())))?;
+        return Ok(m);
+    }
+
+    if json_path.exists() {
+        let content = std::fs::read_to_string(&json_path)?;
+        let m: Machine = serde_json::from_str(&content)
+            .map_err(|e| MachError::Machine(format!("failed to parse machine.json in {}: {e}", machine_dir.display())))?;
+        // Auto-migrate to machine.yaml
+        if let Ok(yaml_str) = serde_yaml::to_string(&m) {
+            let _ = atomic_write(&yaml_path, yaml_str.as_bytes());
+            let _ = std::fs::remove_file(&json_path);
+        }
+        return Ok(m);
+    }
+
+    Err(MachError::NotFound {
+        resource: "machine configuration".to_string(),
+        name: machine_dir.display().to_string(),
+    })
+}
+
+/// Persist a machine descriptor to disk inside `<machines_dir>/<machine.config.name>/machine.yaml`
 /// using atomic file write semantics to prevent 0-byte corruptions.
 pub fn save_machine(machines_dir: &Path, machine: &Machine) -> Result<()> {
     let dir = machines_dir.join(&machine.config.name);
     std::fs::create_dir_all(&dir)?;
-    let path = dir.join("machine.json");
-    let content = serde_json::to_string_pretty(machine)
+    let yaml_path = dir.join("machine.yaml");
+    let content = serde_yaml::to_string(machine)
         .map_err(|e| MachError::Machine(format!("failed to serialize machine {}: {e}", machine.config.name)))?;
-    atomic_write(&path, content.as_bytes())?;
+    atomic_write(&yaml_path, content.as_bytes())?;
+    let _ = std::fs::remove_file(dir.join("machine.json"));
     Ok(())
 }
 
@@ -282,6 +314,65 @@ mod tests {
 
         let serialized = serde_json::to_string(&cfg).unwrap();
         assert!(serialized.contains(r#""isolated":true"#));
+    }
+
+    #[test]
+    fn test_machine_yaml_serialization_roundtrip() {
+        let machine = Machine::new(MachineConfig {
+            name: "yaml-vm".to_string(),
+            distro: "debian".to_string(),
+            arch: Architecture::Aarch64,
+            cpus: 4,
+            memory_mb: 4096,
+            disk_gb: 30,
+            isolated: false,
+            is_system: false,
+        });
+
+        let yaml = serde_yaml::to_string(&machine).unwrap();
+        assert!(yaml.contains("name: yaml-vm"));
+        assert!(yaml.contains("cpus: 4"));
+        assert!(yaml.contains("memory_mb: 4096"));
+
+        let deserialized: Machine = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(deserialized.config.name, "yaml-vm");
+        assert_eq!(deserialized.config.cpus, 4);
+        assert_eq!(deserialized.config.memory_mb, 4096);
+    }
+
+    #[test]
+    fn test_machine_auto_migration_from_json_to_yaml() {
+        let temp_dir = std::env::temp_dir().join(format!("mach_test_mig_{}", uuid::Uuid::new_v4()));
+        let machine_dir = temp_dir.join("test-mig");
+        std::fs::create_dir_all(&machine_dir).unwrap();
+
+        let machine = Machine::new(MachineConfig {
+            name: "test-mig".to_string(),
+            distro: "alpine".to_string(),
+            arch: Architecture::Aarch64,
+            cpus: 2,
+            memory_mb: 2048,
+            disk_gb: 10,
+            isolated: false,
+            is_system: false,
+        });
+
+        // Write legacy machine.json
+        let json_content = serde_json::to_string_pretty(&machine).unwrap();
+        let json_path = machine_dir.join("machine.json");
+        std::fs::write(&json_path, json_content).unwrap();
+
+        // Verify machine.yaml doesn't exist yet
+        let yaml_path = machine_dir.join("machine.yaml");
+        assert!(!yaml_path.exists());
+
+        // load_machine should parse JSON and automatically migrate to YAML
+        let loaded = load_machine(&machine_dir).unwrap();
+        assert_eq!(loaded.config.name, "test-mig");
+        assert!(yaml_path.exists(), "machine.yaml should have been created on migration");
+        assert!(!json_path.exists(), "machine.json should have been cleaned up");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
 

@@ -20,7 +20,7 @@ pub async fn run_port_forwarder(docker_sock: &Path, machines_dir: &Path) -> Resu
     let mut active_listeners: HashMap<u16, oneshot::Sender<()>> = HashMap::new();
 
     loop {
-        sleep(Duration::from_millis(1500)).await;
+        sleep(Duration::from_millis(500)).await;
 
         if !docker_sock.exists() {
             // Clean up any lingering listeners if docker daemon stopped
@@ -36,7 +36,8 @@ pub async fn run_port_forwarder(docker_sock: &Path, machines_dir: &Path) -> Resu
 
         let guest_ip = machines
             .iter()
-            .find(|m| m.ip_address.is_some() && m.state == mach_common::machine::MachineState::Running)
+            .find(|m| m.config.name == "mach-docker" && m.state == mach_common::machine::MachineState::Running && m.ip_address.is_some())
+            .or_else(|| machines.iter().find(|m| m.ip_address.is_some() && m.state == mach_common::machine::MachineState::Running))
             .and_then(|m| m.ip_address);
 
         let guest_ip = match guest_ip {

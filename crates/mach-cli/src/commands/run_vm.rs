@@ -24,10 +24,7 @@ pub fn run(
         || mach_common::config::MachConfig::load()
             .ok()
             .and_then(|cfg| {
-                let meta_path = cfg.machines_dir.join(name).join("machine.json");
-                std::fs::read_to_string(meta_path)
-                    .ok()
-                    .and_then(|s| serde_json::from_str::<mach_common::machine::Machine>(&s).ok())
+                mach_common::machine::load_machine(&cfg.machines_dir.join(name)).ok()
             })
             .map(|m| m.config.isolated)
             .unwrap_or(false);
