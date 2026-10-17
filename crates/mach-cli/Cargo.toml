@@ -1,0 +1,28 @@
+[package]
+name = "mach-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "User-facing CLI binary for the Mach macOS VM manager"
+
+[[bin]]
+name = "mach"
+path = "src/main.rs"
+
+[dependencies]
+mach-common = { path = "../mach-common" }
+mach-vmm    = { path = "../mach-vmm" }
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+clap.workspace = true
+clap_complete.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+dirs.workspace = true
+chrono.workspace = true
+nix.workspace = true
+uuid.workspace = true
+libc.workspace = true

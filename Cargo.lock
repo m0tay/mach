@@ -392,6 +392,89 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
+name = "mach-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "clap_complete",
+ "dirs",
+ "libc",
+ "mach-common",
+ "mach-vmm",
+ "nix",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "mach-common"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dirs",
+ "libc",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "mach-hypervisor"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
+ "libc",
+ "mach-common",
+ "nix",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "mach-virtio"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
+ "bytes",
+ "mach-common",
+ "parking_lot",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "mach-vmm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "cc",
+ "libc",
+ "mach-common",
+ "mach-hypervisor",
+ "mach-virtio",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -437,89 +520,6 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "memoffset",
-]
-
-[[package]]
-name = "norb-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "clap_complete",
- "dirs",
- "libc",
- "nix",
- "norb-common",
- "norb-vmm",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "norb-common"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "dirs",
- "libc",
- "once_cell",
- "serde",
- "serde_json",
- "serde_yaml",
- "thiserror",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "norb-hypervisor"
-version = "0.1.0"
-dependencies = [
- "bitflags",
- "libc",
- "nix",
- "norb-common",
- "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "norb-virtio"
-version = "0.1.0"
-dependencies = [
- "bitflags",
- "bytes",
- "norb-common",
- "parking_lot",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "norb-vmm"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "cc",
- "libc",
- "norb-common",
- "norb-hypervisor",
- "norb-virtio",
- "parking_lot",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tracing",
 ]
 
 [[package]]

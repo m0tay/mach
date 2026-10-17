@@ -1,19 +1,19 @@
 [workspace]
 members = [
-    "crates/norb-common",
-    "crates/norb-hypervisor",
-    "crates/norb-vmm",
-    "crates/norb-virtio",
-    "crates/norb-cli",
+    "crates/mach-common",
+    "crates/mach-hypervisor",
+    "crates/mach-vmm",
+    "crates/mach-virtio",
+    "crates/mach-cli",
 ]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-authors = ["Norb Contributors"]
+authors = ["Mach Contributors"]
 license = "MIT"
-repository = "https://github.com/user/norb"
+repository = "https://github.com/douglaslobo/mach"
 
 [workspace.dependencies]
 # Async runtime

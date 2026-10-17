@@ -1,0 +1,20 @@
+[package]
+name = "mach-hypervisor"
+version.workspace = true
+edition.workspace = true
+description = "Safe Rust bindings to Apple's Hypervisor.framework for macOS ARM64 virtualization"
+license.workspace = true
+
+[dependencies]
+mach-common = { path = "../mach-common" }
+thiserror.workspace = true
+tracing.workspace = true
+libc.workspace = true
+nix.workspace = true
+bitflags.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Hypervisor.framework is linked via build.rs
+
+[build-dependencies]
+# none needed - we use the build script for link flags only
