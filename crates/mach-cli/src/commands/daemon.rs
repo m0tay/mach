@@ -21,6 +21,7 @@ pub async fn run_foreground() -> Result<()> {
     let machines_dir = cfg.machines_dir.clone();
 
     println!("[mach-daemon] Starting embedded DNS responder on 127.0.0.1:5354...");
+    println!("[mach-daemon] Starting native Apple Silicon mDNS responder (*.mach.local)...");
     println!("[mach-daemon] Starting Docker dynamic port forwarder...");
     println!("[mach-daemon] Starting HTTP/HTTPS reverse proxy on 127.0.0.1:80/443 (*.mach.local)...");
     println!("[mach-daemon] Starting macOS host command bridge...");
@@ -35,6 +36,11 @@ pub async fn run_foreground() -> Result<()> {
             }
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
+    });
+
+    let m_dir_mdns = machines_dir.clone();
+    let mdns_task = tokio::spawn(async move {
+        crate::mdns::run_mdns_loop(&m_dir_mdns).await;
     });
 
     let ds_clone = docker_sock.clone();
@@ -75,7 +81,7 @@ pub async fn run_foreground() -> Result<()> {
         }
     });
 
-    let _ = tokio::join!(dns_task, forwarder_task, proxy_task, bridge_task);
+    let _ = tokio::join!(dns_task, mdns_task, forwarder_task, proxy_task, bridge_task);
     Ok(())
 }
 

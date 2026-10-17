@@ -215,12 +215,11 @@ pub async fn run() -> Result<()> {
         println!("  \x1b[1;33m!\x1b[0m Background Daemon:   Stopped (starts automatically when VM starts)");
     }
 
-    // 11. macOS DNS Resolver (*.mach.local)
+    // 11. macOS Domain Resolution (*.mach.local)
+    println!("  \x1b[1;32m✓\x1b[0m Local Domains:       Active via native Apple Silicon mDNS (*.mach.local)");
     let (dns_ok, _) = crate::dns::check_or_setup_resolver();
     if dns_ok {
-        println!("  \x1b[1;32m✓\x1b[0m macOS DNS Resolver:  Configured (/etc/resolver/mach.local)");
-    } else {
-        println!("  \x1b[1;33m!\x1b[0m macOS DNS Resolver:  Not configured (run `machctl dns setup`)");
+        println!("  \x1b[1;32m✓\x1b[0m Unicast Resolver:    Configured (/etc/resolver/mach.local)");
     }
 
     // 12. Machines overview

@@ -351,6 +351,9 @@ pub async fn run(name: Option<&str>) -> Result<()> {
         eprintln!("[mach] Notice: failed to install guest mac CLI: {e}");
     }
 
+    // Immediately publish native Apple Silicon mDNS domain (<name>.mach.local)
+    crate::mdns::register_immediate(&machine.config.name, ip);
+
     println!(
         "\x1b[1;32m✓\x1b[0m Machine \x1b[1m{}\x1b[0m is UP and RUNNING (PID: {}).",
         machine.config.name, child_pid
