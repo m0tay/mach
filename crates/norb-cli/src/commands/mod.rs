@@ -2,6 +2,7 @@
 
 pub mod boot;
 pub mod clone_cmd;
+pub mod completion;
 pub mod config;
 pub mod create;
 pub mod daemon;
@@ -14,8 +15,10 @@ pub mod doctor;
 pub mod export_import;
 pub mod info;
 pub mod k8s;
+pub mod link;
 pub mod list;
 pub mod logs;
+pub mod menu_cmd;
 pub mod mount;
 pub mod push_pull;
 pub mod rename_cmd;
@@ -27,6 +30,7 @@ pub mod ssh;
 pub mod start;
 pub mod status;
 pub mod stop;
+pub mod tls_cmd;
 pub mod top;
 pub mod version;
 

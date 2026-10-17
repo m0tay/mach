@@ -10,6 +10,8 @@ pub mod cloud_init;
 mod commands;
 pub mod dns;
 pub mod images;
+pub mod menu;
+pub mod nfs;
 pub mod port_forward;
 pub mod proxy;
 pub mod ssh;
