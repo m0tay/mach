@@ -25,6 +25,7 @@ pub mod rename_cmd;
 pub mod restart;
 pub mod run_cmd;
 pub mod run_vm;
+pub mod setup;
 pub mod shell;
 pub mod ssh;
 pub mod start;

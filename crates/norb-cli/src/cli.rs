@@ -330,6 +330,13 @@ pub enum Commands {
     /// Launch minimal Apple menu bar status item
     Menu,
 
+    /// Initial environment setup and onboarding tour
+    Setup {
+        /// Display interactive welcome tour in plain English
+        #[arg(long, default_value_t = true)]
+        welcome: bool,
+    },
+
     /// Display version and build information
     Version,
 

@@ -125,8 +125,8 @@ async fn main() -> Result<()> {
         let cfg = NorbConfig::load()?;
         let machines = commands::load_all_machines(&cfg.machines_dir)?;
         if machines.is_empty() {
-            println!("To use Docker:\n    docker run ...\nSee \"norb docker\" for more info.\n");
-            println!("To create a Linux machine:\n    norb create debian\nSee \"norb create --help\" for supported distros and options.");
+            println!("No machines found. Welcome to Norb! Starting initial environment setup...\n");
+            commands::setup::run(true).await?;
             return Ok(());
         }
 
@@ -170,7 +170,7 @@ async fn main() -> Result<()> {
         "default", "export", "import", "rename", "shell", "run", "info",
         "status", "top", "logs", "ssh", "push", "pull", "docker", "daemon",
         "dns", "doctor", "config", "version", "boot", "run-vm", "debug",
-        "mount", "code", "k8s", "link", "tls", "completion", "menu", "help",
+        "mount", "code", "k8s", "link", "tls", "completion", "menu", "setup", "help",
         "--help", "-h", "--version", "-V",
     ];
 
@@ -366,6 +366,9 @@ async fn main() -> Result<()> {
         }
         Commands::Menu => {
             commands::menu_cmd::run().await?;
+        }
+        Commands::Setup { welcome } => {
+            commands::setup::run(welcome).await?;
         }
         Commands::Version => {
             commands::version::run().await?;
