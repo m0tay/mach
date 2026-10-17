@@ -115,7 +115,16 @@ pub async fn enable() -> Result<()> {
     }
 
     let m = find_machine(&cfg.machines_dir, &vm_name)?.unwrap();
-    let is_alive = m.state == MachineState::Running && m.pid.map(|p| nix::sys::signal::kill(nix::unistd::Pid::from_raw(p as i32), None).is_ok()).unwrap_or(false);
+    let mut is_alive = m.state == MachineState::Running && m.pid.map(|p| nix::sys::signal::kill(nix::unistd::Pid::from_raw(p as i32), None).is_ok()).unwrap_or(false);
+    if is_alive {
+        if let Some(ip) = m.ip_address {
+            if !tokio::time::timeout(std::time::Duration::from_millis(1500), tokio::net::TcpStream::connect((ip, 22))).await.map(|r| r.is_ok()).unwrap_or(false) {
+                is_alive = false;
+            }
+        } else {
+            is_alive = false;
+        }
+    }
     if !is_alive {
         crate::commands::start::run(Some(&vm_name)).await?;
     }
@@ -378,18 +387,17 @@ pub async fn status() -> Result<()> {
 
             if tunnel_connected {
                 println!("  API Server:  \x1b[1;32m●\x1b[0m \x1b[1;34mhttps://127.0.0.1:26443\x1b[0m (reachable)");
+                let home = dirs::home_dir().unwrap_or_default();
+                let conf = home.join(".kube").join("config.mach");
+                if conf.exists() {
+                    println!("  Kubeconfig:  {}", conf.display());
+                    let _ = Command::new("kubectl")
+                        .args(["--kubeconfig", conf.to_str().unwrap(), "--request-timeout=2s", "get", "nodes"])
+                        .status();
+                }
             } else {
                 println!("  API Server:  \x1b[1;31m○\x1b[0m \x1b[1;33mhttps://127.0.0.1:26443\x1b[0m (not responding)");
                 println!("               Run \x1b[1;34mmachctl k8s start\x1b[0m to restore the tunnel.");
-            }
-
-            let home = dirs::home_dir().unwrap_or_default();
-            let conf = home.join(".kube").join("config.mach");
-            if conf.exists() {
-                println!("  Kubeconfig:  {}", conf.display());
-                let _ = Command::new("kubectl")
-                    .args(["--kubeconfig", conf.to_str().unwrap(), "get", "nodes"])
-                    .status();
             }
         }
         Some(m) => {

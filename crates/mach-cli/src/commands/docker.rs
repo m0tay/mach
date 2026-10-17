@@ -48,7 +48,16 @@ pub async fn setup(system: bool) -> Result<()> {
 
     // 1. Ensure dedicated mach-docker VM exists and is running
     let docker_vm = ensure_docker_vm(&cfg).await?;
-    let is_alive = docker_vm.state == MachineState::Running && docker_vm.pid.map(|p| nix::sys::signal::kill(nix::unistd::Pid::from_raw(p as i32), None).is_ok()).unwrap_or(false);
+    let mut is_alive = docker_vm.state == MachineState::Running && docker_vm.pid.map(|p| nix::sys::signal::kill(nix::unistd::Pid::from_raw(p as i32), None).is_ok()).unwrap_or(false);
+    if is_alive {
+        if let Some(ip) = docker_vm.ip_address {
+            if !tokio::time::timeout(std::time::Duration::from_millis(1500), tokio::net::TcpStream::connect((ip, 22))).await.map(|r| r.is_ok()).unwrap_or(false) {
+                is_alive = false;
+            }
+        } else {
+            is_alive = false;
+        }
+    }
     if !is_alive {
         println!("  \x1b[1;36m➜\x1b[0m Starting Docker infrastructure machine ({DOCKER_VM_NAME})...");
         crate::commands::start::run(Some(DOCKER_VM_NAME)).await?;

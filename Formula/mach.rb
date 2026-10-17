@@ -1,13 +1,12 @@
 class Mach < Formula
-  desc "Supersonic, lightweight Linux virtualization & container engine for Apple Silicon"
+  desc "Supersonic Linux virtualization & container engine for Apple Silicon"
   homepage "https://github.com/douglaslobo/mach"
   url "file:///Users/douglaslobo/Developer/norb/dist/mach-0.1.0-aarch64-apple-darwin.tar.gz"
-  version "0.1.0"
-  sha256 "598bee5ff7f529508b545b9d9669ef82cf7b09ac1c806202ce3e06196f9518fa"
+  sha256 "1d4ef8715309d3c26ae803eae168d8e9eb9c8369dc04665cecb690d7c1cb98bd"
   license "MIT"
 
-  depends_on :macos
   depends_on arch: :arm64
+  depends_on :macos
 
   def install
     bin.install "mach"
@@ -23,13 +22,10 @@ class Mach < Formula
     # Codesign with hypervisor and virtualization entitlements
     system "codesign", "--force", "--entitlements", "entitlements.plist", "--sign", "-", bin/"mach"
 
-    # Shell autocompletions for bash, zsh, and fish
-    (bash_completion/"mach").write Utils.safe_popen_read(bin/"mach", "completion", "bash") rescue nil
-    (zsh_completion/"_mach").write Utils.safe_popen_read(bin/"mach", "completion", "zsh") rescue nil
-    (fish_completion/"mach.fish").write Utils.safe_popen_read(bin/"mach", "completion", "fish") rescue nil
+    generate_completions_from_executable(bin/"mach", "completion")
   end
 
-  def post_install
+  def post_install_steps
     # Initialize Mach environment, configs, keys, contexts safely without overwriting user data
     system bin/"mach", "init", "--non-interactive"
   end

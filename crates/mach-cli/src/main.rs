@@ -278,9 +278,13 @@ async fn main() -> Result<()> {
 
             // In mach, control plane administrative commands belong exclusively to machctl.
             // If invoked via mach, provide clean guidance pointing to machctl.
-            if first_arg == "inspect" || first_arg == "dump" {
+            let ctl_only_commands = [
+                "doctor", "inspect", "dump", "top", "config", "daemon", "dns", "tls",
+                "mount", "code", "link", "debug", "export", "import", "clone", "rename",
+            ];
+            if ctl_only_commands.contains(&first_arg.as_str()) {
                 eprintln!(
-                    "In mach, 'machctl' manages the macOS virtualization control plane.\nUse: machctl {} <machine>\n'mach' is reserved for Linux shell and command execution (e.g. 'mach uname -a').\n",
+                    "In mach, 'machctl' manages the macOS virtualization control plane.\nUse: machctl {} [options]\n'mach' is reserved for daily Linux shell and command execution (e.g. 'mach uname -a').\n",
                     first_arg
                 );
                 anyhow::bail!("'{first_arg}' is a control plane command. Run 'machctl {first_arg}' instead.");
