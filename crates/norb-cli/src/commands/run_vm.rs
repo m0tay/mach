@@ -6,7 +6,7 @@ use std::os::unix::io::AsRawFd;
 use std::path::Path;
 
 pub fn run(
-    _name: &str,
+    name: &str,
     kernel: Option<&Path>,
     initrd: Option<&Path>,
     disk: Option<&Path>,
@@ -18,6 +18,27 @@ pub fn run(
 ) -> Result<()> {
     let cmdline = "console=hvc0 rdinit=/init quiet";
 
+    // Determine if the machine is configured for isolated sandbox mode.
+    // If isolated == true, omit shared directory to prevent host directory access.
+    let is_isolated = std::env::args().any(|arg| arg == "--isolated")
+        || norb_common::config::NorbConfig::load()
+            .ok()
+            .and_then(|cfg| {
+                let meta_path = cfg.machines_dir.join(name).join("machine.json");
+                std::fs::read_to_string(meta_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str::<norb_common::machine::Machine>(&s).ok())
+            })
+            .map(|m| m.config.isolated)
+            .unwrap_or(false);
+
+    let effective_shared_dir = if is_isolated {
+        eprintln!("[norb-vmm] Machine '{name}' running in isolated sandbox mode (host directory sharing disabled)");
+        None
+    } else {
+        shared_dir
+    };
+
     // Use an unread pipe for stdin and stdout (vm.log) for console output
     let in_pipe = nix::unistd::pipe()?;
     let out_fd = std::io::stdout().as_raw_fd();
@@ -27,7 +48,7 @@ pub fn run(
         initrd,
         disk,
         cidata,
-        shared_dir,
+        effective_shared_dir,
         cmdline,
         cpus,
         memory_mb,

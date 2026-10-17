@@ -119,6 +119,10 @@ pub struct MachineConfig {
 
     /// Root disk size in gibibytes (GiB).
     pub disk_gb: u64,
+
+    /// Run in isolated sandbox mode (disables /Users file sharing and host bridge).
+    #[serde(default)]
+    pub isolated: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -217,3 +221,41 @@ impl fmt::Display for Machine {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_machine_config_isolated_default() {
+        let json_without_isolated = r#"{
+            "name": "test-vm",
+            "distro": "ubuntu",
+            "arch": "Aarch64",
+            "cpus": 2,
+            "memory_mb": 2048,
+            "disk_gb": 20
+        }"#;
+        let cfg: MachineConfig = serde_json::from_str(json_without_isolated).unwrap();
+        assert!(!cfg.isolated);
+    }
+
+    #[test]
+    fn test_machine_config_isolated_explicit() {
+        let json_with_isolated = r#"{
+            "name": "test-isolated-vm",
+            "distro": "ubuntu",
+            "arch": "Aarch64",
+            "cpus": 4,
+            "memory_mb": 4096,
+            "disk_gb": 40,
+            "isolated": true
+        }"#;
+        let cfg: MachineConfig = serde_json::from_str(json_with_isolated).unwrap();
+        assert!(cfg.isolated);
+
+        let serialized = serde_json::to_string(&cfg).unwrap();
+        assert!(serialized.contains(r#""isolated":true"#));
+    }
+}
+

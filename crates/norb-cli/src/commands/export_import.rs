@@ -84,13 +84,13 @@ pub async fn import(in_file: &Path, name: &str) -> Result<()> {
         None
     };
 
-    let (distro, cpus, memory_mb, disk_gb, arch) = if let Some(saved) = maybe_config {
-        (saved.distro, saved.cpus, saved.memory_mb, saved.disk_gb, saved.arch)
+    let (distro, cpus, memory_mb, disk_gb, arch, isolated) = if let Some(saved) = maybe_config {
+        (saved.distro, saved.cpus, saved.memory_mb, saved.disk_gb, saved.arch, saved.isolated)
     } else {
         let disk_gb = fs::metadata(&target_disk)
             .map(|m| (m.len() / (1024 * 1024 * 1024)).max(1))
             .unwrap_or(20);
-        ("custom".to_string(), cfg.default_cpus, cfg.default_memory_mb, disk_gb, Architecture::Aarch64)
+        ("custom".to_string(), cfg.default_cpus, cfg.default_memory_mb, disk_gb, Architecture::Aarch64, false)
     };
 
     let machine = Machine {
@@ -102,6 +102,7 @@ pub async fn import(in_file: &Path, name: &str) -> Result<()> {
             memory_mb,
             disk_gb,
             arch,
+            isolated,
         },
         state: MachineState::Stopped,
         ip_address: None,
