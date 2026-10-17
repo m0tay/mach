@@ -56,9 +56,13 @@ pub enum Commands {
     /// List all machines
     #[command(alias = "ls")]
     List {
-        /// Show all machines including system infrastructure machines
+        /// Show all machines including stopped
         #[arg(short, long)]
         all: bool,
+
+        /// Show protected system infrastructure machines (mach-docker, mach-kubernetes)
+        #[arg(long)]
+        system: bool,
     },
 
     /// Clone an existing machine using APFS Copy-on-Write

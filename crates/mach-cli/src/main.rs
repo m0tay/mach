@@ -235,8 +235,8 @@ async fn main() -> Result<()> {
         } => {
             commands::create::run(&distro, name.as_deref(), cpus, memory, disk, &arch).await?;
         }
-        Commands::List { all } => {
-            commands::list::run(all).await?;
+        Commands::List { all, system } => {
+            commands::list::run(all, system).await?;
         }
         Commands::Clone { source, target } => {
             commands::clone_cmd::run(&source, &target).await?;

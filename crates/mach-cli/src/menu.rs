@@ -234,33 +234,101 @@ mod imp {
         msg_send_1(menu, sel_registerName(b"addItem:\0".as_ptr() as _), sep);
     }
 
-    fn is_docker_active(cfg: Option<&NorbConfig>) -> bool {
+    fn is_system_machine(m: &mach_common::machine::Machine) -> bool {
+        m.is_system()
+            || m.config.name == "mach-docker"
+            || m.config.name == "mach-kubernetes"
+            || m.config.name == "mach-k8s"
+            || m.config.name == "norb-k8s"
+    }
+
+    fn is_docker_socket_responding(cfg: Option<&NorbConfig>) -> bool {
+        let mut candidates = Vec::new();
         if let Some(cfg) = cfg {
-            let sock = cfg.data_dir.join("run").join("docker.sock");
-            if sock.exists() && std::os::unix::net::UnixStream::connect(&sock).is_ok() {
-                return true;
-            }
+            candidates.push(cfg.data_dir.join("run").join("docker.sock"));
         }
-        let var_sock = std::path::Path::new("/var/run/docker.sock");
-        if var_sock.exists() && std::os::unix::net::UnixStream::connect(var_sock).is_ok() {
-            return true;
+        if let Some(home) = dirs::home_dir() {
+            candidates.push(home.join(".mach").join("run").join("docker.sock"));
+            candidates.push(home.join(".norb").join("run").join("docker.sock"));
+        }
+        candidates.push(std::path::PathBuf::from("/var/run/docker.sock"));
+
+        for sock_path in candidates {
+            if !sock_path.exists() {
+                continue;
+            }
+            if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(&sock_path) {
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(250)));
+                let _ = stream.set_write_timeout(Some(std::time::Duration::from_millis(250)));
+                use std::io::{Read, Write};
+                if stream
+                    .write_all(b"GET /_ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                    .is_ok()
+                {
+                    let mut buf = [0u8; 128];
+                    if let Ok(n) = stream.read(&mut buf) {
+                        if n > 0 {
+                            let resp = String::from_utf8_lossy(&buf[..n]);
+                            if resp.starts_with("HTTP/") || resp.contains("200 OK") || resp.contains("OK") {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
         }
         false
     }
 
-    fn is_k8s_ready(running_machines: &[mach_common::machine::Machine]) -> bool {
-        let k8s_vm_running = running_machines.iter().any(|m| m.config.name == "mach-kubernetes" || m.config.name == "mach-k8s" || m.config.name == "norb-k8s");
-        if k8s_vm_running {
-            if let Some(home) = dirs::home_dir() {
-                let kubeconfig_mach = home.join(".kube").join("config.mach");
-                let kubeconfig_norb = home.join(".kube").join("config.norb");
-                if kubeconfig_mach.exists() || kubeconfig_norb.exists() {
-                    return true;
+    fn is_k8s_api_responding() -> bool {
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 26443));
+        let timeout = std::time::Duration::from_millis(250);
+        std::net::TcpStream::connect_timeout(&addr, timeout).is_ok()
+    }
+
+    fn get_docker_status(
+        all_machines: &[mach_common::machine::Machine],
+        cfg: Option<&NorbConfig>,
+    ) -> &'static str {
+        let docker_vm = all_machines.iter().find(|m| m.config.name == "mach-docker");
+        match docker_vm {
+            None => "Docker: Not installed",
+            Some(m) => match &m.state {
+                MachineState::Error(_) => "Docker: Error",
+                MachineState::Stopped | MachineState::Stopping => "Docker: Stopped",
+                MachineState::Creating | MachineState::Starting => "Docker: Starting...",
+                MachineState::Running => {
+                    if is_docker_socket_responding(cfg) {
+                        "Docker: Ready"
+                    } else {
+                        "Docker: Starting..."
+                    }
                 }
-            }
-            return true;
+            },
         }
-        false
+    }
+
+    fn get_k8s_status(all_machines: &[mach_common::machine::Machine]) -> &'static str {
+        let k8s_vm = all_machines.iter().find(|m| {
+            m.config.name == "mach-kubernetes"
+                || m.config.name == "mach-k8s"
+                || m.config.name == "norb-k8s"
+        });
+        match k8s_vm {
+            None => "Kubernetes: Not installed",
+            Some(m) => match &m.state {
+                MachineState::Error(_) => "Kubernetes: Error",
+                MachineState::Stopped | MachineState::Stopping => "Kubernetes: Stopped",
+                MachineState::Creating | MachineState::Starting => "Kubernetes: Starting...",
+                MachineState::Running => {
+                    if is_k8s_api_responding() {
+                        "Kubernetes: Ready"
+                    } else {
+                        "Kubernetes: Starting..."
+                    }
+                }
+            },
+        }
     }
 
     unsafe fn populate_menu(menu: *mut c_void, target: *mut c_void) {
@@ -269,20 +337,17 @@ mod imp {
 
         // Discover machines
         let cfg_res = NorbConfig::load();
-        let all_running = if let Ok(ref cfg) = cfg_res {
-            if let Ok(machines) = crate::commands::load_all_machines(&cfg.machines_dir) {
-                machines
-                    .into_iter()
-                    .filter(|m| m.state == MachineState::Running)
-                    .collect::<Vec<_>>()
-            } else {
-                Vec::new()
-            }
+        let all_machines = if let Ok(ref cfg) = cfg_res {
+            crate::commands::load_all_machines(&cfg.machines_dir).unwrap_or_default()
         } else {
             Vec::new()
         };
 
-        let user_machines: Vec<_> = all_running.iter().filter(|m| !m.is_system()).collect();
+        // Filter out any system infrastructure machines (mach-docker, mach-kubernetes, is_system())
+        let user_machines: Vec<_> = all_machines
+            .iter()
+            .filter(|m| !is_system_machine(m) && m.state == MachineState::Running)
+            .collect();
 
         let running_count = user_machines.len();
         let vm_label = if running_count == 1 { "VM" } else { "VMs" };
@@ -315,21 +380,11 @@ mod imp {
         }
 
         // Docker Socket status
-        let docker_active = is_docker_active(cfg_res.as_ref().ok());
-        let docker_text = if docker_active {
-            "Docker Engine: Active (mach-docker)"
-        } else {
-            "Docker Engine: Inactive"
-        };
+        let docker_text = get_docker_status(&all_machines, cfg_res.as_ref().ok());
         add_menu_item(menu, docker_text, None, None, false);
 
         // Kubernetes status
-        let k8s_ready = is_k8s_ready(&all_running);
-        let k8s_text = if k8s_ready {
-            "Kubernetes: Ready (mach-kubernetes)"
-        } else {
-            "Kubernetes: Stopped"
-        };
+        let k8s_text = get_k8s_status(&all_machines);
         add_menu_item(menu, k8s_text, None, None, false);
 
         // Separator
@@ -382,7 +437,7 @@ mod imp {
     extern "C" fn on_open_shell(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
         let exe = std::env::current_exe()
             .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| "norb".to_string());
+            .unwrap_or_else(|_| "mach".to_string());
         let script = format!(
             r#"tell application "Terminal"
     do script "{}"
@@ -410,7 +465,7 @@ end tell"#,
             if !machine_name.is_empty() {
                 let exe = std::env::current_exe()
                     .map(|p| p.to_string_lossy().into_owned())
-                    .unwrap_or_else(|_| "norb".to_string());
+                    .unwrap_or_else(|_| "mach".to_string());
                 let script = format!(
                     r#"tell application "Terminal"
     do script "{} shell {}"
@@ -587,7 +642,7 @@ end tell"#,
                                 // setTemplate:YES allows macOS to adapt icon for dark/light mode
                                 msg_send_bool(image, sel_registerName(b"setTemplate:\0".as_ptr() as _), 1);
                                 msg_send_1(button, sel_registerName(b"setImage:\0".as_ptr() as _), image);
-                                msg_send_1(button, sel_registerName(b"setTitle:\0".as_ptr() as _), ns_string(" Mach"));
+                                msg_send_1(button, sel_registerName(b"setTitle:\0".as_ptr() as _), ns_string(""));
                                 has_image = true;
                             }
                         }
