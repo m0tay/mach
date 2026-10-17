@@ -1,9 +1,9 @@
 class Mach < Formula
   desc "Supersonic, lightweight Linux virtualization & container engine for Apple Silicon"
   homepage "https://github.com/douglaslobo/mach"
-  url "file:///Users/douglaslobo/Developer/mach/dist/mach-0.1.0-aarch64-apple-darwin.tar.gz"
+  url "file:///Users/douglaslobo/Developer/norb/dist/mach-0.1.0-aarch64-apple-darwin.tar.gz"
   version "0.1.0"
-  sha256 "640d147a26f12408376e44929b29005f810cebf32b01424afcc2cb8104ce9c47"
+  sha256 "3ba47d10c6fcb9c025751c88d1141527a8bd1ed66d0e6765145843596819ca29"
   license "MIT"
 
   depends_on :macos
@@ -36,7 +36,7 @@ class Mach < Formula
 
   def caveats
     <<~EOS
-      ⚡️ Mach is initialized and ready on your Apple Silicon Mac!
+      ⚡️ mach is initialized and ready on your Apple Silicon Mac!
 
       Quickstart:
         • Open Linux shell:         mach
