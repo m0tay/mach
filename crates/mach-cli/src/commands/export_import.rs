@@ -80,14 +80,6 @@ pub async fn import(in_file: &Path, name: &str) -> Result<()> {
         fs::read_to_string(&alt_sidecar_path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
-    } else if legacy_sidecar_path.exists() {
-        fs::read_to_string(&legacy_sidecar_path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-    } else if legacy_alt_sidecar_path.exists() {
-        fs::read_to_string(&legacy_alt_sidecar_path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
     } else {
         None
     };
