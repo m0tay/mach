@@ -185,6 +185,7 @@ mod imp {
         pub image: String,
         pub state: String,     // "running", "exited", etc.
         pub status: String,    // "Up 53 minutes"
+        pub created: i64,
         pub public_port: Option<u16>,
         pub private_port: Option<u16>,
         pub ip: Option<String>,
@@ -375,6 +376,7 @@ mod imp {
                 }
 
                 let domain = format!("{}.mach.local", name);
+                let created = item.get("Created").and_then(|v| v.as_i64()).unwrap_or(0);
 
                 result.push(ContainerMenuItem {
                     id,
@@ -382,6 +384,7 @@ mod imp {
                     image,
                     state,
                     status,
+                    created,
                     public_port,
                     private_port,
                     ip,
@@ -773,14 +776,18 @@ mod imp {
         };
 
         // ═════════════════════════════════════════════════════════════════════════
-        // 1. VIRTUAL MACHINES
+        // 1. VIRTUAL MACHINES (Top 5)
         // ═════════════════════════════════════════════════════════════════════════
         add_menu_item(menu, "VIRTUAL MACHINES", None, None, false);
 
-        if snapshot.vms.is_empty() {
+        let mut sorted_vms = snapshot.vms.clone();
+        sorted_vms.sort_by_key(|m| if m.state == MachineState::Running { 0 } else { 1 });
+        let total_vms = sorted_vms.len();
+
+        if sorted_vms.is_empty() {
             add_menu_item(menu, "  None", None, None, false);
         } else {
-            for vm in &snapshot.vms {
+            for vm in sorted_vms.iter().take(5) {
                 let bullet = match vm.state {
                     MachineState::Running => "●",
                     MachineState::Starting | MachineState::Creating | MachineState::Stopping => "◐",
@@ -882,12 +889,18 @@ mod imp {
 
                 attach_submenu(parent_item, sub);
             }
+
+            if total_vms > 5 {
+                let more_title = format!("  + {} more...", total_vms - 5);
+                let dash_sel = sel_registerName(b"onOpenDashboard:\0".as_ptr() as _);
+                add_menu_item(menu, &more_title, Some(dash_sel), Some(target), true);
+            }
         }
 
         add_separator(menu);
 
         // ═════════════════════════════════════════════════════════════════════════
-        // 2. CONTAINERS
+        // 2. CONTAINERS (Top 5 Recent)
         // ═════════════════════════════════════════════════════════════════════════
         add_menu_item(menu, "CONTAINERS", None, None, false);
 
@@ -913,9 +926,16 @@ mod imp {
             add_menu_item(menu, "  None", None, None, false);
         } else {
             let mut sorted = snapshot.containers.clone();
-            sorted.sort_by_key(|c| if c.state == "running" { 0 } else { 1 });
+            sorted.sort_by(|a, b| {
+                let a_running = a.state == "running";
+                let b_running = b.state == "running";
+                b_running
+                    .cmp(&a_running)
+                    .then_with(|| b.created.cmp(&a.created))
+            });
+            let total_containers = sorted.len();
 
-            for c in &sorted {
+            for c in sorted.iter().take(5) {
                 let is_up = c.state == "running";
                 let bullet = if is_up { "●" } else { "○" };
                 let name = truncate(&c.name, 14);
@@ -1025,12 +1045,18 @@ mod imp {
 
                 attach_submenu(parent_item, sub);
             }
+
+            if total_containers > 5 {
+                let more_title = format!("  + {} more...", total_containers - 5);
+                let dash_sel = sel_registerName(b"onOpenDashboard:\0".as_ptr() as _);
+                add_menu_item(menu, &more_title, Some(dash_sel), Some(target), true);
+            }
         }
 
         add_separator(menu);
 
         // ═════════════════════════════════════════════════════════════════════════
-        // 3. KUBERNETES
+        // 3. KUBERNETES (Top 5 Workloads & Services)
         // ═════════════════════════════════════════════════════════════════════════
         add_menu_item(menu, "KUBERNETES", None, None, false);
 
@@ -1058,7 +1084,8 @@ mod imp {
             if snapshot.k8s_services.is_empty() && snapshot.k8s_pods.is_empty() {
                 add_menu_item(menu, "  None", None, None, false);
             } else {
-                for pod in &snapshot.k8s_pods {
+                let total_pods = snapshot.k8s_pods.len();
+                for pod in snapshot.k8s_pods.iter().take(5) {
                     let bullet = match pod.phase.as_str() {
                         "Running" | "Succeeded" => "●",
                         "Pending" => "◐",
@@ -1092,8 +1119,14 @@ mod imp {
 
                     attach_submenu(parent_item, sub);
                 }
+                if total_pods > 5 {
+                    let more_title = format!("  + {} more pods...", total_pods - 5);
+                    let dash_sel = sel_registerName(b"onOpenDashboard:\0".as_ptr() as _);
+                    add_menu_item(menu, &more_title, Some(dash_sel), Some(target), true);
+                }
 
-                for svc in &snapshot.k8s_services {
+                let total_svcs = snapshot.k8s_services.len();
+                for svc in snapshot.k8s_services.iter().take(5) {
                     let name = truncate(&svc.name, 14);
                     let title = if let Some(np) = svc.node_port {
                         format!("  ● {} :{} ➔ :{}", name, svc.port, np)
@@ -1154,6 +1187,11 @@ mod imp {
                     );
 
                     attach_submenu(parent_item, sub);
+                }
+                if total_svcs > 5 {
+                    let more_title = format!("  + {} more services...", total_svcs - 5);
+                    let dash_sel = sel_registerName(b"onOpenDashboard:\0".as_ptr() as _);
+                    add_menu_item(menu, &more_title, Some(dash_sel), Some(target), true);
                 }
             }
         }
