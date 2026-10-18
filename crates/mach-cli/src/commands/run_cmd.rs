@@ -73,10 +73,20 @@ pub async fn run(
 
     let user = user_opt.unwrap_or("root");
 
-    let mut cmd = crate::ssh::new_ssh_command(&ip, user);
-    cmd.args(effective_cmd);
+    let mut status = None;
+    for attempt in 0..6 {
+        let mut cmd = crate::ssh::new_ssh_command(&ip, user);
+        cmd.args(effective_cmd);
+        if let Ok(st) = cmd.status() {
+            if st.success() || attempt == 5 || st.code() != Some(255) {
+                status = Some(st);
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
 
-    let status = cmd.status()?;
+    let status = status.context("failed to execute ssh command")?;
     if !status.success() {
         if let Some(code) = status.code() {
             std::process::exit(code);

@@ -475,6 +475,8 @@ async fn run_ext_impl(name: Option<&str>, to_stderr: bool, quiet: bool) -> Resul
                 ]);
                 let test_ssh = std::process::Command::new("ssh")
                     .args(&test_args)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
                     .status();
                 if let Ok(st) = test_ssh {
                     if st.success() {
@@ -565,6 +567,8 @@ async fn run_ext_impl(name: Option<&str>, to_stderr: bool, quiet: bool) -> Resul
     ]);
     let check_docker = std::process::Command::new("ssh")
         .args(&check_docker_args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status();
 
     if let Ok(st) = check_docker {
