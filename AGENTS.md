@@ -149,6 +149,45 @@ Commands must live in **ONE place and one place only**. Never duplicate commands
 - Keep `Cargo.toml`, `Formula/mach.rb`, manpages (`mach.1`, `machctl.1`), and tests in sync.
 - Automate distribution archive packaging and Homebrew tap synchronization via `./install.sh`.
 
+### Rule 7: Mandatory Post-Implementation Release Pipeline
+Whenever implementing a solution, bug fix, or feature in Mach, you MUST complete the full end-to-end release pipeline before declaring the task finished:
+
+1. **Update Package & Bump Minor SemVer**:
+   - Increment minor version in `Cargo.toml` (e.g. `0.14.0` -> `0.15.0`).
+   - Sync `man/man1/mach.1` and `man/man1/machctl.1` headers.
+   - Run `./install.sh` to compile, codesign with Apple Silicon entitlements, update `~/.cargo/bin`, package distribution archives (`dist/mach-<VERSION>-aarch64-apple-darwin.tar.gz`), and synchronize `Formula/mach.rb` + `Casks/mach.rb`.
+
+2. **Verify Tests**:
+   - Ensure unit tests (`cargo test --workspace`) and CLI primitives (`./tests/test_cli_primitives.sh`) pass 100%.
+
+3. **Clean Git Commit**:
+   - Stage all modified crates, manpages, and the newly generated distribution archive.
+   - Commit with a clean, conventional commit message:
+     ```bash
+     git add -A && git commit -m "feat/fix: <description> (v<VERSION>)"
+     ```
+
+4. **Push to Remote**:
+   - Always push commits and tags to the remote repository so the origin is kept in sync:
+     ```bash
+     git push origin main
+     ```
+
+5. **Brew Reinstall & System Refresh (CLI + Menu Bar)**:
+   - Reinstall the Homebrew cask to refresh the primary CLI binaries (`/opt/homebrew/bin/mach` and `/opt/homebrew/bin/machctl`), shell completions, and man pages:
+     ```bash
+     brew reinstall --cask mach
+     ```
+   - Restart the menu bar status item if it was running:
+     ```bash
+     pkill -f "mach menu" 2>/dev/null || true
+     mach menu > ~/.mach/logs/menu.log 2>&1 &
+     ```
+   - Verify the installed version in terminal:
+     ```bash
+     mach --version && machctl --version
+     ```
+
 ---
 
 ## 5. Key Technical Invariants & Gotchas
