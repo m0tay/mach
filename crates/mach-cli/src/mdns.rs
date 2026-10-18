@@ -236,14 +236,27 @@ async fn fetch_docker_container_domains(docker_sock: &Path) -> Vec<(String, Stri
     let mut domains = Vec::new();
     if let serde_json::Value::Array(list) = containers {
         for c in list {
-            if let Some(names) = c.get("Names").and_then(|v| v.as_array()) {
-                if let Some(first_name) = names.first().and_then(|v| v.as_str()) {
-                    let clean = first_name.trim_start_matches('/');
-                    if !clean.is_empty() {
-                        domains.push((format!("mach-{}", clean), format!("{}.mach.local", clean)));
-                    }
+            if let Some(labels) = c.get("Labels").and_then(|l| l.as_object()) {
+                if labels.contains_key("io.kubernetes.pod.name")
+                    || labels.contains_key("io.kubernetes.docker.type")
+                    || labels.contains_key("io.cri-containerd.kind")
+                {
+                    continue;
                 }
             }
+
+            let first_name = c.get("Names")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim_start_matches('/'))
+                .unwrap_or("");
+
+            if first_name.is_empty() || first_name.starts_with("k8s_") {
+                continue;
+            }
+
+            domains.push((format!("mach-{}", first_name), format!("{}.mach.local", first_name)));
             if let Some(img) = c.get("Image").and_then(|v| v.as_str()) {
                 let repo = img.split(':').next().unwrap_or(img);
                 let clean_repo = repo.rsplit('/').next().unwrap_or(repo);

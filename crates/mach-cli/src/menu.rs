@@ -336,11 +336,25 @@ mod imp {
                     .unwrap_or("")
                     .to_string();
 
-                if name.is_empty() {
+                if name.is_empty() || name.starts_with("k8s_") {
                     continue;
                 }
 
+                // Filter out Kubernetes internal/managed containers from the Docker CONTAINERS list
+                // Kubernetes workloads are already displayed in their own KUBERNETES section!
+                if let Some(labels) = item.get("Labels").and_then(|l| l.as_object()) {
+                    if labels.contains_key("io.kubernetes.pod.name")
+                        || labels.contains_key("io.kubernetes.docker.type")
+                        || labels.contains_key("io.cri-containerd.kind")
+                    {
+                        continue;
+                    }
+                }
+
                 let image = item.get("Image").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if image.starts_with("rancher/mirrored-pause") || image.contains("/pause") {
+                    continue;
+                }
                 let state = item.get("State").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let status = item.get("Status").and_then(|v| v.as_str()).unwrap_or("").to_string();
 

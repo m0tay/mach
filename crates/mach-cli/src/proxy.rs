@@ -567,7 +567,24 @@ async fn fetch_container_routes(docker_sock: &Path) -> Result<Vec<RouteTarget>> 
                 .unwrap_or("")
                 .to_string();
 
+            if raw_name.is_empty() || raw_name.starts_with("k8s_") {
+                continue;
+            }
+            if let Some(labels) = c.get("Labels").and_then(|l| l.as_object()) {
+                if labels.contains_key("io.kubernetes.pod.name")
+                    || labels.contains_key("io.kubernetes.docker.type")
+                    || labels.contains_key("io.cri-containerd.kind")
+                {
+                    continue;
+                }
+            }
+
             let image = c.get("Image").and_then(|v| v.as_str());
+            if let Some(img) = image {
+                if img.starts_with("rancher/mirrored-pause") || img.contains("/pause") {
+                    continue;
+                }
+            }
             let image_repo = image.map(|img| {
                 let repo = img.split(':').next().unwrap_or(img);
                 repo.rsplit('/').next().unwrap_or(repo).to_ascii_lowercase()
