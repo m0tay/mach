@@ -135,6 +135,7 @@ async fn main() -> Result<()> {
         }
 
         // Smart 'mach' zero-args behavior:
+        commands::menu_cmd::ensure_menu_bar_running();
         let cfg = MachConfig::load()?;
 
         let machines = commands::load_all_machines(&cfg.machines_dir)?;
@@ -351,6 +352,14 @@ async fn main() -> Result<()> {
     // Initialize structured logging
     let log_level = if cli.verbose { "debug" } else { "warn" };
     mach_common::logging::init_logging(log_level);
+
+    // Keep menu bar status item active in background unless running internal workers or uninstall
+    match &cli.command {
+        Commands::Menu | Commands::RunVm { .. } | Commands::Uninstall { .. } | Commands::Completion { .. } => {}
+        _ => {
+            commands::menu_cmd::ensure_menu_bar_running();
+        }
+    }
 
     match cli.command {
         Commands::Create {

@@ -13,7 +13,7 @@ mod imp {
     use mach_common::config::MachConfig;
     use mach_common::machine::MachineState;
     use std::ffi::{c_char, c_void, CStr, CString};
-    use std::sync::{Once, OnceLock};
+    use std::sync::Once;
 
     #[link(name = "AppKit", kind = "framework")]
     #[link(name = "Foundation", kind = "framework")]
@@ -311,9 +311,12 @@ mod imp {
         all_machines: &[mach_common::machine::Machine],
         cfg: Option<&MachConfig>,
     ) -> &'static str {
+        if is_docker_socket_responding(cfg) {
+            return "Docker: Ready";
+        }
         let docker_vm = all_machines.iter().find(|m| m.config.name == "mach-system" || m.config.name == "mach-docker");
         match docker_vm {
-            None => "Docker: Not installed",
+            None => "Docker: Stopped",
             Some(m) => match &m.state {
                 MachineState::Error(_) => "Docker: Error",
                 MachineState::Stopped | MachineState::Stopping => "Docker: Stopped",
@@ -340,7 +343,7 @@ mod imp {
                 || m.config.name == "mach-k8s"
         });
         match infra_vm {
-            None => "Kubernetes: Not installed",
+            None => "Kubernetes: Stopped",
             Some(m) => match &m.state {
                 MachineState::Error(_) => "Kubernetes: Error",
                 MachineState::Stopped | MachineState::Stopping => "Kubernetes: Stopped",
@@ -372,22 +375,54 @@ mod imp {
         // Filter out any system infrastructure machines (mach-docker, mach-kubernetes, is_system())
         let user_machines: Vec<_> = all_machines
             .iter()
-            .filter(|m| !is_system_machine(m) && m.state == MachineState::Running)
+            .filter(|m| !is_system_machine(m))
             .collect();
 
-        let running_count = user_machines.len();
-        let vm_label = if running_count == 1 { "VM" } else { "VMs" };
-        let status_header = format!("Mach: Running ({} {})", running_count, vm_label);
+        let running_machines: Vec<_> = user_machines
+            .iter()
+            .filter(|m| m.state == MachineState::Running)
+            .copied()
+            .collect();
+
+        let starting_machines: Vec<_> = user_machines
+            .iter()
+            .filter(|m| {
+                matches!(m.state, MachineState::Starting | MachineState::Creating)
+                    || (m.state != MachineState::Running && crate::commands::find_running_vm_pid(&m.config.name).is_some())
+            })
+            .copied()
+            .collect();
+
+        let any_starting = all_machines.iter().find(|m| {
+            matches!(m.state, MachineState::Starting | MachineState::Creating)
+                || (m.state != MachineState::Running && crate::commands::find_running_vm_pid(&m.config.name).is_some())
+        });
+
+        // 1. Status header
+        let status_header = if let Some(m) = starting_machines.first().copied().or(any_starting) {
+            format!("Starting {}...", m.config.name)
+        } else if running_machines.is_empty() {
+            "0 VMs running".to_string()
+        } else {
+            let running_count = running_machines.len();
+            let vm_label = if running_count == 1 { "VM" } else { "VMs" };
+            format!("{} {} running", running_count, vm_label)
+        };
         add_menu_item(menu, &status_header, None, None, false);
 
         // Separator
         add_separator(menu);
 
-        // Running User Machines list (with IP)
-        if user_machines.is_empty() {
-            add_menu_item(menu, "  No running user machines", None, None, false);
-        } else {
-            for m in &user_machines {
+        // 2. Machine items
+        if !starting_machines.is_empty() {
+            for m in &starting_machines {
+                let title = format!("  ◐ Starting {}...", m.config.name);
+                add_menu_item(menu, &title, None, None, false);
+            }
+        }
+
+        if !running_machines.is_empty() {
+            for m in &running_machines {
                 let ip_str = m
                     .ip_address
                     .map(|ip| ip.to_string())
@@ -405,18 +440,22 @@ mod imp {
             }
         }
 
-        // Docker Socket status
+        if starting_machines.is_empty() && running_machines.is_empty() {
+            add_menu_item(menu, "  No running user machines", None, None, false);
+        }
+
+        // 3. Docker Socket status
         let docker_text = get_docker_status(&all_machines, cfg_res.as_ref().ok());
         add_menu_item(menu, docker_text, None, None, false);
 
-        // Kubernetes status
+        // 4. Kubernetes status
         let k8s_text = get_k8s_status(&all_machines, cfg_res.as_ref().ok());
         add_menu_item(menu, k8s_text, None, None, false);
 
         // Separator
         add_separator(menu);
 
-        // Quick Actions
+        // 5. Quick Actions
         let open_shell_sel = sel_registerName(b"onOpenShell:\0".as_ptr() as _);
         add_menu_item(
             menu,
@@ -447,11 +486,11 @@ mod imp {
         // Separator
         add_separator(menu);
 
-        // Discrete version display (non-clickable)
+        // 6. Discrete version display (non-clickable)
         let version_label = format!("mach v{}", env!("CARGO_PKG_VERSION"));
         add_menu_item(menu, &version_label, None, None, false);
 
-        // Quit Mach
+        // 7. Quit Mach
         let quit_sel = sel_registerName(b"onQuit:\0".as_ptr() as _);
         add_menu_item(menu, "Quit Mach", Some(quit_sel), Some(target), true);
     }
@@ -579,6 +618,7 @@ end tell"#,
         crate::commands::k8s::terminate_k8s_ssh_tunnel();
         if let Ok(cfg) = MachConfig::load() {
             let _ = std::fs::remove_file(cfg.data_dir.join("run").join("docker.sock"));
+            let _ = std::fs::remove_file(cfg.data_dir.join("run").join("menu.pid"));
         }
 
         // 4. Terminate NSApplication
@@ -597,41 +637,43 @@ end tell"#,
         }
     }
 
-    static MENU_START_TIME: OnceLock<std::time::Instant> = OnceLock::new();
+    static STATUS_BUTTON: std::sync::atomic::AtomicPtr<c_void> =
+        std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
 
-    extern "C" fn check_running_state(_this: *mut c_void, _cmd: *mut c_void, _timer: *mut c_void) {
-        let start = MENU_START_TIME.get_or_init(std::time::Instant::now);
-        // 3-second grace period on launch
-        if start.elapsed().as_millis() < 3000 {
+    unsafe fn update_status_item_state() {
+        let button = STATUS_BUTTON.load(std::sync::atomic::Ordering::SeqCst);
+        if button.is_null() {
             return;
         }
 
-        if let Ok(cfg) = MachConfig::load() {
-            let has_running = crate::commands::load_all_machines(&cfg.machines_dir)
-                .map(|ms| {
-                    ms.iter().any(|m| {
-                        m.state == MachineState::Running
-                            || m.state == MachineState::Starting
-                            || crate::commands::find_running_vm_pid(&m.config.name).is_some()
-                    })
-                })
-                .unwrap_or(false);
+        let cfg_res = MachConfig::load();
+        let all_machines = if let Ok(ref cfg) = cfg_res {
+            crate::commands::load_all_machines(&cfg.machines_dir).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
 
-            if !has_running {
-                unsafe {
-                    let app = msg_send_0(
-                        objc_getClass(b"NSApplication\0".as_ptr() as _),
-                        sel_registerName(b"sharedApplication\0".as_ptr() as _),
-                    );
-                    if !app.is_null() {
-                        msg_send_1(
-                            app,
-                            sel_registerName(b"terminate:\0".as_ptr() as _),
-                            std::ptr::null_mut(),
-                        );
-                    }
-                }
-            }
+        let starting = all_machines.iter().find(|m| {
+            matches!(m.state, MachineState::Starting | MachineState::Creating)
+                || (m.state != MachineState::Running && crate::commands::find_running_vm_pid(&m.config.name).is_some())
+        });
+
+        let tooltip = if let Some(m) = starting {
+            format!("Starting {}...", m.config.name)
+        } else {
+            format!("mach v{}", env!("CARGO_PKG_VERSION"))
+        };
+
+        msg_send_1(
+            button,
+            sel_registerName(b"setToolTip:\0".as_ptr() as _),
+            ns_string(&tooltip),
+        );
+    }
+
+    extern "C" fn check_running_state(_this: *mut c_void, _cmd: *mut c_void, _timer: *mut c_void) {
+        unsafe {
+            update_status_item_state();
         }
     }
 
@@ -738,6 +780,7 @@ end tell"#,
                 sel_registerName(b"button\0".as_ptr() as _),
             );
             if !button.is_null() {
+                STATUS_BUTTON.store(button, std::sync::atomic::Ordering::SeqCst);
                 let img_cls = objc_getClass(b"NSImage\0".as_ptr() as _);
                 let mut image: *mut c_void = std::ptr::null_mut();
 
@@ -777,7 +820,7 @@ end tell"#,
                 } else {
                     msg_send_1(button, sel_registerName(b"setTitle:\0".as_ptr() as _), ns_string("⚡️"));
                 }
-                let tip = format!("mach v{} (Virtualization & Containers)", env!("CARGO_PKG_VERSION"));
+                let tip = format!("mach v{}", env!("CARGO_PKG_VERSION"));
                 msg_send_1(
                     button,
                     sel_registerName(b"setToolTip:\0".as_ptr() as _),
@@ -798,6 +841,7 @@ end tell"#,
             }
             let delegate = msg_send_0(delegate_cls, sel_registerName(b"new\0".as_ptr() as _));
             msg_send_0(delegate, sel_registerName(b"retain\0".as_ptr() as _));
+            update_status_item_state();
 
             let menu_cls = objc_getClass(b"NSMenu\0".as_ptr() as _);
             if menu_cls.is_null() {

@@ -145,9 +145,7 @@ pub async fn run(name: Option<&str>, force: bool, system: bool) -> Result<()> {
                 .into_iter()
                 .filter(|m| m.state == MachineState::Running)
                 .count();
-            if remaining == 0 {
-                crate::commands::menu_cmd::stop_menu_bar();
-            }
+            let _ = remaining;
 
             return Ok(());
         }
@@ -177,7 +175,6 @@ pub async fn run(name: Option<&str>, force: bool, system: bool) -> Result<()> {
     if running_count == 0 {
         terminate_docker_ssh_tunnel(None);
         let _ = std::fs::remove_file(cfg.data_dir.join("run").join("docker.sock"));
-        crate::commands::menu_cmd::stop_menu_bar();
     }
 
     Ok(())

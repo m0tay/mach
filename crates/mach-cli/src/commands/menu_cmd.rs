@@ -1,12 +1,10 @@
 //! Menu command dispatcher for Mach.
 //!
 //! Launches the native Apple Silicon macOS menu bar status item.
-//! Zero-bloat lifecycle: Automatically launches when any machine is running,
-//! and automatically disappears when all machines are stopped.
+//! Stays active in the macOS menu bar to provide real-time status and quick controls.
 
 use anyhow::Result;
 use mach_common::config::MachConfig;
-use mach_common::machine::MachineState;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -17,7 +15,13 @@ pub fn is_menu_running(run_dir: &Path) -> Option<u32> {
     if let Ok(content) = fs::read_to_string(&pid_file) {
         if let Ok(pid) = content.trim().parse::<i32>() {
             if nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok() {
-                return Some(pid as u32);
+                // Verify the pid is actually a running mach menu process
+                if let Ok(out) = Command::new("ps").args(["-p", &pid.to_string(), "-o", "command="]).output() {
+                    let cmdline = String::from_utf8_lossy(&out.stdout);
+                    if cmdline.contains("mach") && cmdline.contains("menu") {
+                        return Some(pid as u32);
+                    }
+                }
             }
         }
     }
@@ -75,42 +79,40 @@ pub fn stop_menu_bar() {
     let _ = Command::new("pkill").args(["-9", "-f", "machctl menu"]).output();
 }
 
-/// Check if any machines are currently in Running state.
-pub fn has_running_machines() -> bool {
-    if let Ok(cfg) = MachConfig::load() {
-        if let Ok(machines) = crate::commands::load_all_machines(&cfg.machines_dir) {
-            return machines.iter().any(|m| m.state == MachineState::Running);
-        }
-    }
-    false
-}
-
 /// Automatically start the macOS menu bar status item in the background if not already active.
 pub fn ensure_menu_bar_running() {
-    if let Ok(cfg) = MachConfig::load() {
-        let run_dir = cfg.data_dir.join("run");
-        if is_menu_running(&run_dir).is_none() {
-            let log_dir = cfg.data_dir.join("logs");
-            let _ = fs::create_dir_all(&run_dir);
-            let _ = fs::create_dir_all(&log_dir);
-            if let Ok(exe) = std::env::current_exe() {
-                let log_path = log_dir.join("menu.log");
-                if let Ok(log_file) = fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&log_path)
-                {
-                    use std::os::unix::process::CommandExt;
-                    if let Ok(child) = Command::new(exe)
-                        .arg("menu")
-                        .stdout(log_file.try_clone().unwrap_or_else(|_| log_file))
-                        .stderr(std::process::Stdio::null())
-                        .stdin(std::process::Stdio::null())
-                        .process_group(0)
-                        .spawn()
-                    {
-                        let _ = fs::write(run_dir.join("menu.pid"), child.id().to_string());
-                    }
+    let (run_dir, log_dir) = if let Ok(cfg) = MachConfig::load() {
+        (cfg.data_dir.join("run"), cfg.data_dir.join("logs"))
+    } else if let Some(home) = dirs::home_dir() {
+        (home.join(".mach/run"), home.join(".mach/logs"))
+    } else {
+        return;
+    };
+
+    if is_menu_running(&run_dir).is_none() {
+        let _ = fs::create_dir_all(&run_dir);
+        let _ = fs::create_dir_all(&log_dir);
+        if let Ok(exe) = std::env::current_exe() {
+            let log_path = log_dir.join("menu.log");
+            if let Ok(log_file) = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)
+            {
+                use std::os::unix::process::CommandExt;
+                let log_err = log_file.try_clone().ok();
+                let mut cmd = Command::new(exe);
+                cmd.arg("menu")
+                    .stdout(log_file)
+                    .stdin(std::process::Stdio::null())
+                    .process_group(0);
+                if let Some(err_file) = log_err {
+                    cmd.stderr(err_file);
+                } else {
+                    cmd.stderr(std::process::Stdio::null());
+                }
+                if let Ok(child) = cmd.spawn() {
+                    let _ = fs::write(run_dir.join("menu.pid"), child.id().to_string());
                 }
             }
         }
@@ -119,13 +121,6 @@ pub fn ensure_menu_bar_running() {
 
 /// Execute the macOS menu bar status item application.
 pub async fn run() -> Result<()> {
-    // If everything is stopped and user runs `mach menu` directly, inform them:
-    if !has_running_machines() {
-        println!("No machines are currently running. Mach's menu bar status item launches");
-        println!("automatically when any machine or service starts, and hides when stopped.");
-        return Ok(());
-    }
-
     if let Ok(cfg) = MachConfig::load() {
         let run_dir = cfg.data_dir.join("run");
         let _ = fs::create_dir_all(&run_dir);
