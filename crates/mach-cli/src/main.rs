@@ -165,6 +165,9 @@ async fn main() -> Result<()> {
             commands::menu_cmd::ensure_menu_bar_running();
         }
 
+        // Restore services if active in last session
+        let _ = commands::restore_services_if_needed(&cfg).await;
+
         return commands::shell::run(Some(&target_name), false, &[]).await;
     }
 

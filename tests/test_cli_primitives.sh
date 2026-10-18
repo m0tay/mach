@@ -40,7 +40,7 @@ echo -e "${BLUE}======================================================${NC}\n"
 echo -e "${YELLOW}[1/15] Testing version and help output...${NC}"
 VER_OUT=$(mach version)
 assert_contains "$VER_OUT" "mach" "mach version returns valid header"
-assert_contains "$VER_OUT" "0.2.0" "mach version returns semantic version"
+assert_contains "$VER_OUT" "0.3.0" "mach version returns semantic version"
 
 HELP_OUT=$(machctl --help)
 assert_contains "$HELP_OUT" "Linux machines:" "machctl --help lists Linux machines group"
@@ -60,6 +60,16 @@ assert_contains "$CFG_OUT" '"default_cpus": 4' "machctl config set updates key i
 machctl config set default_cpus 2
 CFG_RESET=$(machctl config show)
 assert_contains "$CFG_RESET" '"default_cpus": 2' "machctl config set reverts key"
+
+machctl config set docker.was_running true
+CFG_DOCKER=$(machctl config show)
+assert_contains "$CFG_DOCKER" '"was_running": true' "machctl config set docker.was_running updates state"
+machctl config set docker.was_running false
+
+machctl config set k8s.was_running true
+CFG_K8S=$(machctl config show)
+assert_contains "$CFG_K8S" '"was_running": true' "machctl config set k8s.was_running updates state"
+machctl config set k8s.was_running false
 
 # 4. Status checks on empty environment
 echo -e "\n${YELLOW}[4/15] Testing docker and k8s status commands...${NC}"

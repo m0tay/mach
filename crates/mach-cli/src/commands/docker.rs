@@ -171,6 +171,12 @@ pub async fn setup(system: bool) -> Result<()> {
     println!("  \x1b[1;32mdocker ps\x1b[0m");
     println!("  \x1b[1;32mdocker run --rm -v $(pwd):/app -p 8080:80 nginx:alpine\x1b[0m");
 
+    // Record in Mach settings that Docker was running
+    if let Ok(mut c) = MachConfig::load() {
+        c.docker.was_running = true;
+        let _ = c.save();
+    }
+
     Ok(())
 }
 
@@ -181,7 +187,10 @@ pub async fn start() -> Result<()> {
 
 /// Stop Docker engine
 pub async fn stop() -> Result<()> {
-    let cfg = MachConfig::load()?;
+    let mut cfg = MachConfig::load()?;
+    cfg.docker.was_running = false;
+    let _ = cfg.save();
+
     println!("  \x1b[1;36m➜\x1b[0m Stopping Docker engine and terminating socket forwarder...");
     terminate_docker_ssh_tunnel();
     let sock_path = cfg.data_dir.join("run").join("docker.sock");
@@ -214,6 +223,10 @@ pub async fn shell() -> Result<()> {
 
 /// Destroy the Docker infrastructure machine and its container volumes
 pub async fn destroy(force: bool) -> Result<()> {
+    if let Ok(mut c) = MachConfig::load() {
+        c.docker.was_running = false;
+        let _ = c.save();
+    }
     let cfg = MachConfig::load()?;
     if super::find_machine(&cfg.machines_dir, DOCKER_VM_NAME)?.is_none() {
         println!("Docker infrastructure machine does not exist.");

@@ -26,6 +26,11 @@ pub async fn run_foreground() -> Result<()> {
     println!("[mach-daemon] Starting HTTP/HTTPS reverse proxy on 127.0.0.1:80/443 (*.mach.local)...");
     println!("[mach-daemon] Starting macOS host command bridge...");
 
+    let cfg_restore = cfg.clone();
+    tokio::spawn(async move {
+        let _ = crate::commands::restore_services_if_needed(&cfg_restore).await;
+    });
+
     let m_dir = machines_dir.clone();
     let dns_task = tokio::spawn(async move {
         loop {

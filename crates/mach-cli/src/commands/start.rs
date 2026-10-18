@@ -552,6 +552,14 @@ pub async fn run_ext(name: Option<&str>, to_stderr: bool) -> Result<()> {
     crate::commands::daemon::ensure_daemon_running();
     crate::commands::menu_cmd::ensure_menu_bar_running();
 
+    // If starting a user machine, restore background services if active in last session
+    if !machine.is_system() && (cfg.docker.was_running || cfg.k8s.was_running) {
+        let cfg_clone = cfg.clone();
+        std::thread::spawn(move || {
+            super::restore_services_background(&cfg_clone);
+        });
+    }
+
     if !to_stderr {
         println!("\nRun \x1b[1;34mmach shell {}\x1b[0m to enter the machine.", machine.config.name);
         println!("Run \x1b[1;32mdocker ps\x1b[0m (or \x1b[1;32mmachctl docker setup\x1b[0m) to control containers.");

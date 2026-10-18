@@ -543,9 +543,21 @@ end tell"#,
     }
 
     extern "C" fn on_quit(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
-        // 1. Cleanly stop all machines (both user and system)
-        if let Ok(cfg) = MachConfig::load() {
+        // 1. Record running state for services and cleanly stop all machines
+        if let Ok(mut cfg) = MachConfig::load() {
             if let Ok(machines) = crate::commands::load_all_machines(&cfg.machines_dir) {
+                let docker_running = machines.iter().any(|m| {
+                    m.config.name == crate::commands::docker::DOCKER_VM_NAME
+                        && (m.state == MachineState::Running || crate::commands::find_running_vm_pid(&m.config.name).is_some())
+                });
+                let k8s_running = machines.iter().any(|m| {
+                    (m.config.name == crate::commands::k8s::K8S_VM_NAME || m.config.name == crate::commands::k8s::ALT_K8S_VM_NAME)
+                        && (m.state == MachineState::Running || crate::commands::find_running_vm_pid(&m.config.name).is_some())
+                });
+                cfg.docker.was_running = docker_running;
+                cfg.k8s.was_running = k8s_running;
+                let _ = cfg.save();
+
                 for mut m in machines {
                     let _ = crate::commands::stop::stop_single_machine(&mut m, &cfg, true);
                 }
@@ -651,6 +663,20 @@ end tell"#,
 
     pub fn run_menu_bar() -> Result<()> {
         println!("\x1b[1;36m➜\x1b[0m Starting mach menu bar status item (\x1b[1mmach\x1b[0m)...");
+
+        // Restore Docker/Kubernetes if they were running in the previous session
+        if let Ok(cfg) = MachConfig::load() {
+            if cfg.docker.was_running || cfg.k8s.was_running {
+                std::thread::spawn(move || {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build();
+                    if let Ok(rt) = rt {
+                        let _ = rt.block_on(crate::commands::restore_services_if_needed(&cfg));
+                    }
+                });
+            }
+        }
 
         unsafe {
             let pool = objc_autoreleasePoolPush();

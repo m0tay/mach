@@ -81,6 +81,12 @@ pub struct DockerConfig {
     ///
     /// Default: `false`
     pub system_symlink: bool,
+
+    /// Whether Docker was running last time and should be automatically restored on Mach startup.
+    ///
+    /// Default: `false`
+    #[serde(default, alias = "autostart", alias = "auto_start")]
+    pub was_running: bool,
 }
 
 impl Default for DockerConfig {
@@ -89,6 +95,7 @@ impl Default for DockerConfig {
             enabled: true,
             socket_path: PathBuf::from("~/.mach/run/docker.sock"),
             system_symlink: false,
+            was_running: false,
         }
     }
 }
@@ -118,12 +125,19 @@ pub struct K8sConfig {
     ///
     /// Default: `26443`
     pub port: u16,
+
+    /// Whether Kubernetes was running last time and should be automatically restored on Mach startup.
+    ///
+    /// Default: `false`
+    #[serde(default, alias = "autostart", alias = "auto_start")]
+    pub was_running: bool,
 }
 
 impl Default for K8sConfig {
     fn default() -> Self {
         Self {
             port: 26443,
+            was_running: false,
         }
     }
 }
@@ -243,7 +257,11 @@ impl Default for MachConfig {
         // absolute. If dirs::home_dir() returns None (highly unusual on macOS)
         // we fall back to `/tmp/mach` so the process can at least start.
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-        let data_dir = home.join(".mach");
+        let data_dir = if let Ok(val) = std::env::var("MACH_HOME") {
+            PathBuf::from(val)
+        } else {
+            home.join(".mach")
+        };
         let machines_dir = data_dir.join("machines");
         let socket_path = data_dir.join("run").join("mach.sock");
 
@@ -469,7 +487,9 @@ mod tests {
         assert_eq!(cfg.docker.enabled, true);
         assert_eq!(cfg.docker.socket_path, PathBuf::from("~/.mach/run/docker.sock"));
         assert_eq!(cfg.docker.system_symlink, false);
+        assert_eq!(cfg.docker.was_running, false);
         assert_eq!(cfg.k8s.port, 26443);
+        assert_eq!(cfg.k8s.was_running, false);
         assert_eq!(cfg.log_level, "info");
         assert_eq!(cfg.default_machine, None);
     }
@@ -613,6 +633,26 @@ mod tests {
         std::fs::remove_file(dir.join("config.yaml")).unwrap();
         std::fs::write(dir.join("config.json"), "{ bad json").unwrap();
         assert!(MachConfig::load_from_dir(&dir).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_was_running_and_autostart_parsing() {
+        let dir = std::env::temp_dir().join(format!("mach-test-autostart-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let yaml = r#"
+docker:
+  was_running: true
+k8s:
+  autostart: true
+"#;
+        std::fs::write(dir.join("config.yaml"), yaml).unwrap();
+
+        let loaded = MachConfig::load_from_dir(&dir).unwrap();
+        assert!(loaded.docker.was_running);
+        assert!(loaded.k8s.was_running);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

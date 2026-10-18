@@ -174,8 +174,15 @@ pub async fn run() -> Result<()> {
     let host_sock = cfg.data_dir.join("run").join("docker.sock");
     if host_sock.exists() {
         println!("  \x1b[1;32m✓\x1b[0m Docker Socket:       Active at {}", host_sock.display());
+    } else if cfg.docker.was_running {
+        println!("  \x1b[1;32m✓\x1b[0m Docker Integration:  Active in settings (will restore on startup)");
     } else {
         println!("  \x1b[1;33m!\x1b[0m Docker Socket:       Not active (starts automatically when VM starts)");
+    }
+
+    // 8b. Kubernetes Integration
+    if cfg.k8s.was_running {
+        println!("  \x1b[1;32m✓\x1b[0m Kubernetes (K3s):    Active in settings (will restore on startup)");
     }
 
     // 9. Docker Context

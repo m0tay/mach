@@ -318,6 +318,12 @@ pub async fn enable() -> Result<()> {
     println!("  \x1b[1;32mkubectl get nodes\x1b[0m");
     println!("  \x1b[1;32mkubectl --kubeconfig {} get nodes\x1b[0m", mach_kubeconfig.display());
 
+    // Record in Mach settings that Kubernetes was running
+    if let Ok(mut c) = MachConfig::load() {
+        c.k8s.was_running = true;
+        let _ = c.save();
+    }
+
     Ok(())
 }
 
@@ -333,7 +339,10 @@ pub async fn start() -> Result<()> {
 
 /// Stop the Kubernetes cluster node and terminate port forwarding.
 pub async fn stop() -> Result<()> {
-    let cfg = MachConfig::load()?;
+    let mut cfg = MachConfig::load()?;
+    cfg.k8s.was_running = false;
+    let _ = cfg.save();
+
     println!("  \x1b[1;36m➜\x1b[0m Terminating Kubernetes SSH tunnel...");
     terminate_k8s_ssh_tunnel();
 

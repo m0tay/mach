@@ -238,3 +238,62 @@ pub fn kill_running_vm_processes(machine_name_opt: Option<&str>) {
         }
     }
 }
+
+/// Restore Docker and Kubernetes in the background if they were running in the previous session.
+pub fn restore_services_background(cfg: &MachConfig) {
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("mach"));
+
+    // 1. Restore Docker engine if active in previous session
+    if cfg.docker.was_running {
+        let is_running = find_machine(&cfg.machines_dir, docker::DOCKER_VM_NAME)
+            .ok()
+            .flatten()
+            .map(|m| {
+                (m.state == MachineState::Running || find_running_vm_pid(docker::DOCKER_VM_NAME).is_some())
+                    && m.pid.map(|p| nix::sys::signal::kill(nix::unistd::Pid::from_raw(p as i32), None).is_ok()).unwrap_or(false)
+            })
+            .unwrap_or(false);
+
+        if !is_running {
+            let _ = std::process::Command::new(&exe)
+                .args(["docker", "start"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+        }
+    }
+
+    // 2. Restore Kubernetes cluster if active in previous session
+    if cfg.k8s.was_running {
+        let vm_name = k8s::resolve_k8s_machine_name(&cfg.machines_dir).unwrap_or_else(|_| k8s::K8S_VM_NAME.to_string());
+        let is_running = find_machine(&cfg.machines_dir, &vm_name)
+            .ok()
+            .flatten()
+            .map(|m| {
+                (m.state == MachineState::Running || find_running_vm_pid(&vm_name).is_some())
+                    && m.pid.map(|p| nix::sys::signal::kill(nix::unistd::Pid::from_raw(p as i32), None).is_ok()).unwrap_or(false)
+            })
+            .unwrap_or(false);
+
+        if !is_running {
+            let _ = std::process::Command::new(&exe)
+                .args(["k8s", "start"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+        }
+    }
+}
+
+/// Check if Docker or Kubernetes were running previously and restore them on startup.
+pub async fn restore_services_if_needed(cfg: &MachConfig) -> Result<()> {
+    if cfg.docker.was_running || cfg.k8s.was_running {
+        let cfg_clone = cfg.clone();
+        std::thread::spawn(move || {
+            restore_services_background(&cfg_clone);
+        });
+    }
+    Ok(())
+}
