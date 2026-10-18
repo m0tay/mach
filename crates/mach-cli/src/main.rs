@@ -94,8 +94,8 @@ Linux machines:
   ssh         Show SSH connection details (host, port, keys)
 
 Containers:
+  docker      Manage Docker engine (enable, disable, status, restart)
   k8s         Manage local Kubernetes (K3s) cluster (enable, disable, status)
-  docker      Manage Docker CLI integration and legacy sockets
   debug       Debug a Docker container with extra tools
 
 System & Infrastructure:
@@ -104,10 +104,9 @@ System & Infrastructure:
   doctor      Verify hypervisor entitlements, network, and system health
   config      View or modify mach configuration (~/.mach/config.yaml)
   daemon      Manage background DNS (*.mach.local) and port forwarder
-  dns         Configure macOS native DNS resolver
+  dns         Configure macOS native DNS resolver (enable, disable, status)
   tls         Manage local wildcard TLS certificates (*.mach.local)
   menu        Launch native macOS menu bar status item (mach)
-  setup       Run initial onboarding and environment setup
   uninstall   Completely uninstall Mach and clean up all system integration
   version     Show mach version
 
@@ -255,13 +254,12 @@ async fn main() -> Result<()> {
                     if first_arg == "docker" {
                         match sub {
                             Some("status") | None => return commands::docker::status().await,
-                            Some("start") => return commands::docker::start().await,
-                            Some("stop") => return commands::docker::stop().await,
-                            Some("restart") => return commands::docker::restart().await,
-                            Some("setup") => {
+                            Some("start") | Some("enable") | Some("setup") => {
                                 let system = raw_args.iter().any(|a| a == "--system");
-                                return commands::docker::setup(system).await;
+                                return commands::docker::start(system).await;
                             }
+                            Some("stop") | Some("disable") => return commands::docker::stop().await,
+                            Some("restart") => return commands::docker::restart().await,
                             Some("destroy") => {
                                 let force = raw_args.iter().any(|a| a == "-f" || a == "--force" || a == "-y" || a == "--yes");
                                 return commands::docker::destroy(force).await;
@@ -455,8 +453,11 @@ async fn main() -> Result<()> {
             }
         },
         Commands::Dns { action } => match action {
-            DnsAction::Setup => {
-                commands::dns_cmd::setup()?;
+            DnsAction::Enable | DnsAction::Setup => {
+                commands::dns_cmd::enable()?;
+            }
+            DnsAction::Disable | DnsAction::Remove => {
+                commands::dns_cmd::disable()?;
             }
             DnsAction::Status => {
                 commands::dns_cmd::status()?;
@@ -501,11 +502,14 @@ async fn main() -> Result<()> {
             }
         },
         Commands::Docker { action } => match action {
-            DockerAction::Setup { system } => {
-                commands::docker::setup(system).await?;
+            DockerAction::Enable { system } => {
+                commands::docker::enable(system).await?;
             }
-            DockerAction::Start => {
-                commands::docker::start().await?;
+            DockerAction::Start { system } | DockerAction::Setup { system } => {
+                commands::docker::start(system).await?;
+            }
+            DockerAction::Disable => {
+                commands::docker::disable().await?;
             }
             DockerAction::Stop => {
                 commands::docker::stop().await?;

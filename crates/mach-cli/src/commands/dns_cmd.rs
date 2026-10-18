@@ -5,8 +5,25 @@ use std::time::Duration;
 
 use crate::dns;
 
+pub fn enable() -> Result<()> {
+    setup()
+}
+
+pub fn disable() -> Result<()> {
+    println!("\x1b[1;36m➜\x1b[0m Disabling Mach local DNS (*.mach.local)...");
+    match dns::remove_resolver() {
+        Ok(_) => {
+            println!("  \x1b[1;32m✓\x1b[0m Successfully removed /etc/resolver/mach.local.");
+        }
+        Err(e) => {
+            println!("  \x1b[1;33m!\x1b[0m Could not remove /etc/resolver/mach.local: {e}");
+        }
+    }
+    Ok(())
+}
+
 pub fn setup() -> Result<()> {
-    println!("\x1b[1;36m➜\x1b[0m Setting up Mach local DNS (*.mach.local)...");
+    println!("\x1b[1;36m➜\x1b[0m Enabling Mach local DNS (*.mach.local)...");
 
     let (already_configured, hint) = dns::check_or_setup_resolver();
     if already_configured {
@@ -68,7 +85,7 @@ pub fn status() -> Result<()> {
     if configured && responding {
         println!("\x1b[1;32m✓ Local DNS (*.mach.local) is fully operational.\x1b[0m\n");
     } else if !configured {
-        println!("Run \x1b[1;34mmachctl dns setup\x1b[0m to configure the macOS resolver.\n");
+        println!("Run \x1b[1;34mmachctl dns enable\x1b[0m to configure the macOS resolver.\n");
     }
 
     Ok(())

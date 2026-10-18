@@ -615,7 +615,7 @@ async fn run_ext_impl(name: Option<&str>, to_stderr: bool, quiet: bool) -> Resul
         println!("  ➜ To open shell:      \x1b[1;32mmach\x1b[0m (or \x1b[1;32mmach shell {}\x1b[0m)", machine.config.name);
         println!("  ➜ To run commands:    \x1b[1;32mmach uname -a\x1b[0m");
         println!("  ➜ To view dashboard:  \x1b[1;34mmachctl top\x1b[0m");
-        println!("  ➜ To manage Docker:   \x1b[1;32mdocker ps\x1b[0m (or \x1b[1;32mmachctl docker setup\x1b[0m)");
+        println!("  ➜ To manage Docker:   \x1b[1;32mdocker ps\x1b[0m");
     }
 
     Ok(())

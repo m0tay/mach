@@ -388,6 +388,25 @@ pub fn install_resolver() -> Result<()> {
     }
 }
 
+/// Remove `/etc/resolver/mach.local` directly or via sudo.
+pub fn remove_resolver() -> Result<()> {
+    let resolver_file = std::path::Path::new("/etc/resolver/mach.local");
+    if !resolver_file.exists() {
+        return Ok(());
+    }
+    if std::fs::remove_file(resolver_file).is_ok() {
+        return Ok(());
+    }
+    let status = std::process::Command::new("sudo")
+        .args(["rm", "-f", "/etc/resolver/mach.local"])
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        anyhow::bail!("failed to remove /etc/resolver/mach.local");
+    }
+}
+
 /// Query the DNS responder at 127.0.0.1:5354 with a short timeout.
 pub fn probe_dns_responder(timeout: Duration) -> bool {
     let socket = match std::net::UdpSocket::bind("127.0.0.1:0") {

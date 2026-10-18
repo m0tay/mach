@@ -388,14 +388,16 @@ pub enum Commands {
     /// Launch minimal Apple menu bar status item
     Menu,
 
-    /// Initialize Mach configuration, keys, Docker context, and run diagnostics
+    /// Initialize Mach configuration, keys, Docker context, and run diagnostics (internal/automated)
+    #[command(hide = true)]
     Init {
         /// Non-interactive mode (for automated scripts and package managers)
         #[arg(long)]
         non_interactive: bool,
     },
 
-    /// Initial environment setup and onboarding tour
+    /// Initial environment setup and onboarding tour (internal/automatic)
+    #[command(hide = true)]
     Setup {
         /// Display interactive welcome tour in plain English
         #[arg(long, default_value_t = true)]
@@ -496,28 +498,41 @@ pub enum ConfigAction {
 /// Subcommands for `mach docker`.
 #[derive(Subcommand, Debug)]
 pub enum DockerAction {
-    /// Configure and ensure macOS docker context is connected to Mach
-    Setup {
+    /// Enable and start Docker engine and configure CLI context
+    Enable {
         /// Also symlink /var/run/docker.sock for legacy tools & IDEs
         #[arg(long)]
         system: bool,
     },
-    /// Start the dedicated Docker infrastructure machine
-    Start,
-    /// Stop the dedicated Docker infrastructure machine
+    /// Disable and stop Docker engine
+    Disable,
+    /// Start Docker engine and configure CLI context
+    Start {
+        /// Also symlink /var/run/docker.sock for legacy tools & IDEs
+        #[arg(long)]
+        system: bool,
+    },
+    /// Stop Docker engine
     Stop,
-    /// Restart the dedicated Docker infrastructure machine
+    /// Restart Docker engine
     Restart,
     /// Open an interactive shell inside the Docker infrastructure machine
     Shell,
-    /// Destroy the dedicated Docker infrastructure machine and its volumes
+    /// Show Docker integration status
+    Status,
+    /// Destroy Docker infrastructure machine and its volumes
     Destroy {
         /// Skip confirmation prompt
         #[arg(short, long)]
         force: bool,
     },
-    /// Show Docker integration status
-    Status,
+    /// Configure and ensure macOS docker context is connected to Mach (legacy)
+    #[command(hide = true)]
+    Setup {
+        /// Also symlink /var/run/docker.sock for legacy tools & IDEs
+        #[arg(long)]
+        system: bool,
+    },
 }
 
 /// Subcommands for `mach k8s`.
@@ -556,10 +571,18 @@ pub enum DaemonAction {
 /// Subcommands for `mach dns`.
 #[derive(Subcommand, Debug)]
 pub enum DnsAction {
-    /// Configure or show macOS resolver configuration (/etc/resolver/mach.local)
-    Setup,
+    /// Enable macOS native DNS resolver for *.mach.local
+    Enable,
+    /// Disable macOS native DNS resolver
+    Disable,
     /// Show DNS resolver status
     Status,
+    /// Configure macOS resolver (/etc/resolver/mach.local) (legacy)
+    #[command(hide = true)]
+    Setup,
+    /// Remove macOS resolver (legacy)
+    #[command(hide = true)]
+    Remove,
 }
 
 /// Subcommands for `mach tls`.
