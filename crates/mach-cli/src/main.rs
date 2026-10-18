@@ -106,7 +106,7 @@ System & Infrastructure:
   daemon      Manage background DNS (*.mach.local) and port forwarder
   dns         Configure macOS native DNS resolver
   tls         Manage local wildcard TLS certificates (*.mach.local)
-  menu        Launch native macOS menu bar status item ( mach)
+  menu        Launch native macOS menu bar status item (mach)
   setup       Run initial onboarding and environment setup
   uninstall   Completely uninstall Mach and clean up all system integration
   version     Show mach version
@@ -523,8 +523,8 @@ async fn main() -> Result<()> {
                 commands::docker::status().await?;
             }
         },
-        Commands::Debug { container } => {
-            commands::debug::run(&container).await?;
+        Commands::Debug { container, image } => {
+            commands::debug::run(&container, image.as_deref()).await?;
         }
         Commands::Mount { machine, target } => {
             commands::mount::run_mount(&machine, target.as_deref()).await?;

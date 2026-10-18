@@ -2161,7 +2161,7 @@ end tell"#,
             );
 
             println!("\x1b[1;32m✓\x1b[0m mach status item active in macOS menu bar.");
-            println!("  Click \x1b[1m mach\x1b[0m in your top status bar to view running machines and controls.");
+            println!("  Click \x1b[1mmach\x1b[0m in your top status bar to view running machines and controls.");
 
             objc_autoreleasePoolPop(pool);
 

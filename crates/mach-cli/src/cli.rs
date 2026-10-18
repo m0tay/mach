@@ -320,6 +320,10 @@ pub enum Commands {
     Debug {
         /// Target container name or ID
         container: String,
+
+        /// Custom diagnostic image to use (defaults to alpine, busybox, or netshoot)
+        #[arg(short, long)]
+        image: Option<String>,
     },
 
     /// Mount or open a machine's filesystem in macOS Finder

@@ -4,6 +4,7 @@
 //! network, PID, and IPC namespaces. Works even on distroless or scratch containers.
 
 use anyhow::{bail, Context, Result};
+use std::io::IsTerminal;
 use std::process::Command;
 
 /// Diagnostic metadata parsed from `docker inspect`.
@@ -15,6 +16,7 @@ pub struct ContainerMetadata {
     pub ip: String,
     pub ports: Vec<String>,
     pub env: Vec<String>,
+    pub ipc_mode: String,
     pub is_running: bool,
 }
 
@@ -116,6 +118,13 @@ impl ContainerMetadata {
         }
         env.sort();
 
+        // Resolve IPC mode (standard containers have "private" which rejects joining IPC namespace)
+        let ipc_mode = item
+            .pointer("/HostConfig/IpcMode")
+            .and_then(|v| v.as_str())
+            .unwrap_or("private")
+            .to_string();
+
         Ok(Self {
             name,
             short_id,
@@ -123,6 +132,7 @@ impl ContainerMetadata {
             ip,
             ports,
             env,
+            ipc_mode,
             is_running,
         })
     }
@@ -147,10 +157,18 @@ impl ContainerMetadata {
             println!("  \x1b[1mPorts:\x1b[0m        {}", self.ports.join(", "));
         }
         println!("  \x1b[1mEnvironment:\x1b[0m");
+        let max_env = 15;
         if self.env.is_empty() {
             println!("    \x1b[2m(none)\x1b[0m");
         } else {
-            for env_entry in &self.env {
+            for (i, env_entry) in self.env.iter().enumerate() {
+                if i >= max_env {
+                    println!(
+                        "    \x1b[2m• ... ({} more environment variables)\x1b[0m",
+                        self.env.len() - max_env
+                    );
+                    break;
+                }
                 if let Some((k, v)) = env_entry.split_once('=') {
                     println!("    \x1b[2m•\x1b[0m \x1b[1m{k}\x1b[0m={v}");
                 } else {
@@ -164,28 +182,58 @@ impl ContainerMetadata {
 }
 
 /// Debug container candidate image configuration.
-struct DebugCandidate {
-    image: &'static str,
-    cmd: Option<&'static str>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DebugCandidate {
+    pub image: String,
+    pub cmd: Option<String>,
 }
 
 /// Priority-ordered candidate images for the debug container.
-const CANDIDATES: &[DebugCandidate] = &[
-    DebugCandidate {
-        image: "nicolaka/netshoot",
-        cmd: None, // defaults to interactive diagnostic shell with all networking tools loaded
-    },
-    DebugCandidate {
-        image: "busybox",
-        cmd: Some("sh"),
-    },
-    DebugCandidate {
-        image: "alpine",
-        cmd: Some("sh"),
-    },
+/// Lightweight, instant-pull images (alpine, busybox) are prioritized over heavyweight multi-tool images (netshoot).
+pub const DEFAULT_CANDIDATES: &[(&str, Option<&str>)] = &[
+    ("alpine", Some("sh")),
+    ("busybox", Some("sh")),
+    ("nicolaka/netshoot", None),
 ];
 
-pub async fn run(container: &str) -> Result<()> {
+/// Check if an image is already cached locally in Docker.
+pub fn is_image_present(image: &str) -> bool {
+    Command::new("docker")
+        .args(["image", "inspect", image])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Resolve candidate debug images, prioritizing cached images.
+pub fn resolve_candidates(custom_image: Option<&str>) -> Vec<DebugCandidate> {
+    if let Some(img) = custom_image {
+        return vec![DebugCandidate {
+            image: img.to_string(),
+            cmd: None,
+        }];
+    }
+
+    let mut present = Vec::new();
+    let mut missing = Vec::new();
+
+    for &(img, cmd) in DEFAULT_CANDIDATES {
+        let cand = DebugCandidate {
+            image: img.to_string(),
+            cmd: cmd.map(|s| s.to_string()),
+        };
+        if is_image_present(img) {
+            present.push(cand);
+        } else {
+            missing.push(cand);
+        }
+    }
+
+    present.extend(missing);
+    present
+}
+
+pub async fn run(container: &str, custom_image: Option<&str>) -> Result<()> {
     println!("\x1b[1;36m➜\x1b[0m Inspecting target container \x1b[1;34m{container}\x1b[0m...");
 
     // 1. Inspect container
@@ -213,65 +261,101 @@ pub async fn run(container: &str) -> Result<()> {
     // 2. Print container metadata (env, ports, image, IP) before dropping into interactive shell
     meta.print_summary();
 
-    println!("\x1b[1;36m➜\x1b[0m Attaching diagnostic shell (PID, Net, IPC namespaces joined)...");
-    println!("  Target root filesystem mounted at: \x1b[1;33m/host\x1b[0m");
+    let can_join_ipc = meta.ipc_mode == "shareable" || meta.ipc_mode.starts_with("container:");
+    if can_join_ipc {
+        println!("\x1b[1;36m➜\x1b[0m Attaching diagnostic shell (PID, Net, IPC namespaces joined)...");
+    } else {
+        println!("\x1b[1;36m➜\x1b[0m Attaching diagnostic shell (PID and Net namespaces joined)...");
+    }
+    println!("  Host root filesystem mounted at: \x1b[1;33m/host\x1b[0m (read-only)");
     println!("  Type 'exit' to leave debug shell.\n");
 
-    // 3. Connect to target container namespaces using nicolaka/netshoot with fallback to busybox or alpine
+    let candidates = resolve_candidates(custom_image);
+
+    // 3. Connect to target container namespaces
     let mut session_started = false;
-    for (idx, cand) in CANDIDATES.iter().enumerate() {
+    for (idx, cand) in candidates.iter().enumerate() {
         println!(
             "\x1b[1;36m➜\x1b[0m Spawning debug container with \x1b[1;35m{}\x1b[0m...",
             cand.image
         );
 
         let mut cmd = Command::new("docker");
+        let tty_flag = if std::io::stdin().is_terminal() {
+            "-it"
+        } else {
+            "-i"
+        };
         cmd.args([
             "run",
             "--rm",
-            "-it",
+            tty_flag,
             &format!("--net=container:{container}"),
             &format!("--pid=container:{container}"),
-            &format!("--ipc=container:{container}"),
-            "-v",
-            "/:/host:ro",
-            cand.image,
         ]);
-        if let Some(shell_cmd) = cand.cmd {
+
+        if can_join_ipc {
+            cmd.arg(format!("--ipc=container:{container}"));
+        }
+
+        cmd.args(["-v", "/:/host:ro", &cand.image]);
+        if let Some(ref shell_cmd) = cand.cmd {
             cmd.arg(shell_cmd);
         }
 
         match cmd.status() {
-            Ok(status) if status.success() => {
-                session_started = true;
-                break;
-            }
             Ok(status) => {
-                let code_str = status
-                    .code()
+                let code = status.code();
+
+                #[cfg(unix)]
+                let was_signaled = {
+                    use std::os::unix::process::ExitStatusExt;
+                    status.signal().is_some()
+                };
+                #[cfg(not(unix))]
+                let was_signaled = false;
+
+                // If exited successfully (0), interrupted via Ctrl+C (130 / signal),
+                // or if the process exited with standard container command status (not docker 125/126/127 launch error),
+                // the debug session has concluded normally. Do NOT fall through to next candidate!
+                if status.success() || was_signaled || code == Some(130) {
+                    session_started = true;
+                    break;
+                }
+
+                // If code is not a docker daemon/pull/syntax error (125, 126, 127), the user was inside the shell and exited:
+                if let Some(c) = code {
+                    if c != 125 && c != 126 && c != 127 {
+                        session_started = true;
+                        break;
+                    }
+                }
+
+                let code_str = code
                     .map(|c| c.to_string())
                     .unwrap_or_else(|| "terminated by signal".into());
-                if let Some(next) = CANDIDATES.get(idx + 1) {
+
+                if let Some(next) = candidates.get(idx + 1) {
                     eprintln!(
-                        "\x1b[1;33m!\x1b[0m Debug container '{}' exited with status {}. Falling back to '{}'...",
+                        "\x1b[1;33m!\x1b[0m Debug container '{}' could not launch (status {}). Trying '{}'...",
                         cand.image, code_str, next.image
                     );
                 } else {
                     eprintln!(
-                        "\x1b[1;31m✘\x1b[0m Debug container '{}' exited with status {}.",
+                        "\x1b[1;31m✘\x1b[0m Debug container '{}' failed (status {}).",
                         cand.image, code_str
                     );
                 }
             }
             Err(e) => {
-                if let Some(next) = CANDIDATES.get(idx + 1) {
+                if let Some(next) = candidates.get(idx + 1) {
                     eprintln!(
-                        "\x1b[1;33m!\x1b[0m Failed to run '{}': {}. Falling back to '{}'...",
+                        "\x1b[1;33m!\x1b[0m Failed to execute '{}': {}. Trying '{}'...",
                         cand.image, e, next.image
                     );
                 } else {
                     eprintln!(
-                        "\x1b[1;31m✘\x1b[0m Failed to run '{}': {}",
+                        "\x1b[1;31m✘\x1b[0m Failed to execute '{}': {}",
                         cand.image, e
                     );
                 }
@@ -280,7 +364,7 @@ pub async fn run(container: &str) -> Result<()> {
     }
 
     if !session_started {
-        bail!("Failed to start debug session using any candidate image (nicolaka/netshoot, busybox, alpine).");
+        bail!("Failed to start debug session with specified candidate images.");
     }
 
     Ok(())
@@ -391,8 +475,15 @@ mod tests {
 
     #[test]
     fn test_candidates_order() {
-        assert_eq!(CANDIDATES[0].image, "nicolaka/netshoot");
-        assert_eq!(CANDIDATES[1].image, "busybox");
-        assert_eq!(CANDIDATES[2].image, "alpine");
+        assert_eq!(DEFAULT_CANDIDATES[0].0, "alpine");
+        assert_eq!(DEFAULT_CANDIDATES[1].0, "busybox");
+        assert_eq!(DEFAULT_CANDIDATES[2].0, "nicolaka/netshoot");
+    }
+
+    #[test]
+    fn test_resolve_candidates_custom_image() {
+        let candidates = resolve_candidates(Some("curlimages/curl"));
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].image, "curlimages/curl");
     }
 }

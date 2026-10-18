@@ -1,8 +1,8 @@
 cask "mach" do
-  version "0.9.0"
-  sha256 "0405db2f08583cc7dbee700720bdd6968554b9f2dbfb8aee8e61498c9f23f56d"
+  version "0.10.0"
+  sha256 "9e2249d0fffcabd713571a0cf483e28998b7ed274c2b9331b671f274fbcdb86f"
 
-  url "file:///Users/douglaslobo/Developer/mach/dist/mach-0.9.0-aarch64-apple-darwin.tar.gz"
+  url "file:///Users/douglaslobo/Developer/mach/dist/mach-0.10.0-aarch64-apple-darwin.tar.gz"
   name "Mach"
   desc "Supersonic Linux virtualization & container engine for Apple Silicon"
   homepage "https://github.com/douglaslobo/mach"
