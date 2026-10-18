@@ -755,6 +755,15 @@ mod imp {
         msg_send_1(parent_item, sel, submenu);
     }
 
+    fn truncate(s: &str, max_len: usize) -> String {
+        if s.chars().count() > max_len {
+            let truncated: String = s.chars().take(max_len.saturating_sub(1)).collect();
+            format!("{}…", truncated)
+        } else {
+            s.to_string()
+        }
+    }
+
     unsafe fn populate_menu(menu: *mut c_void, target: *mut c_void) {
         msg_send_void(menu, sel_registerName(b"removeAllItems\0".as_ptr() as _));
 
@@ -772,22 +781,24 @@ mod imp {
             add_menu_item(menu, "  None", None, None, false);
         } else {
             for vm in &snapshot.vms {
-                let (bullet, state_label) = match vm.state {
-                    MachineState::Running => ("●", "running"),
-                    MachineState::Starting | MachineState::Creating => ("◐", "starting"),
-                    MachineState::Stopping => ("◐", "stopping"),
-                    MachineState::Stopped => ("○", "stopped"),
-                    MachineState::Error(_) => ("⚠️", "error"),
+                let bullet = match vm.state {
+                    MachineState::Running => "●",
+                    MachineState::Starting | MachineState::Creating | MachineState::Stopping => "◐",
+                    MachineState::Stopped => "○",
+                    MachineState::Error(_) => "⚠️",
                 };
 
+                let name = truncate(&vm.name, 12);
                 let title = if vm.state == MachineState::Running {
                     if let Some(ref ip) = vm.ip {
-                        format!("  {} {} ({})", bullet, vm.name, ip)
+                        format!("  {} {} {}", bullet, name, ip)
                     } else {
-                        format!("  {} {}", bullet, vm.name)
+                        format!("  {} {}", bullet, name)
                     }
+                } else if matches!(vm.state, MachineState::Starting | MachineState::Creating) {
+                    format!("  {} {} (starting)", bullet, name)
                 } else {
-                    format!("  {} {} ({})", bullet, vm.name, state_label)
+                    format!("  {} {}", bullet, name)
                 };
 
                 let parent_item = add_menu_item(menu, &title, None, None, true);
@@ -830,7 +841,7 @@ mod imp {
                         let copy_ip_sel = sel_registerName(b"onCopyText:\0".as_ptr() as _);
                         add_menu_item_with_obj(
                             sub,
-                            &format!("Copy IP ({})", ip),
+                            "Copy IP",
                             Some(copy_ip_sel),
                             Some(target),
                             true,
@@ -841,7 +852,7 @@ mod imp {
                     let open_files_sel = sel_registerName(b"onOpenMachineFiles:\0".as_ptr() as _);
                     add_menu_item_with_obj(
                         sub,
-                        "Browse Files",
+                        "Files",
                         Some(open_files_sel),
                         Some(target),
                         true,
@@ -861,7 +872,7 @@ mod imp {
                     let open_files_sel = sel_registerName(b"onOpenMachineFiles:\0".as_ptr() as _);
                     add_menu_item_with_obj(
                         sub,
-                        "Browse Files",
+                        "Files",
                         Some(open_files_sel),
                         Some(target),
                         true,
@@ -892,7 +903,7 @@ mod imp {
             let start_docker_sel = sel_registerName(b"onStartDocker:\0".as_ptr() as _);
             add_menu_item(
                 sub,
-                "Start Docker Engine",
+                "Start Docker",
                 Some(start_docker_sel),
                 Some(target),
                 true,
@@ -907,17 +918,18 @@ mod imp {
             for c in &sorted {
                 let is_up = c.state == "running";
                 let bullet = if is_up { "●" } else { "○" };
+                let name = truncate(&c.name, 14);
 
                 let title = if is_up {
                     if let Some(pub_p) = c.public_port {
-                        format!("  {} {} :{} ({})", bullet, c.name, pub_p, c.domain)
+                        format!("  {} {} :{}", bullet, name, pub_p)
                     } else if let Some(ref ip) = c.ip {
-                        format!("  {} {} ({})", bullet, c.name, ip)
+                        format!("  {} {} {}", bullet, name, ip)
                     } else {
-                        format!("  {} {}", bullet, c.name)
+                        format!("  {} {}", bullet, name)
                     }
                 } else {
-                    format!("  {} {} (exited)", bullet, c.name)
+                    format!("  {} {}", bullet, name)
                 };
 
                 let parent_item = add_menu_item(menu, &title, None, None, true);
@@ -931,7 +943,7 @@ mod imp {
 
                         add_menu_item_with_obj(
                             sub,
-                            &format!("Open ({})", url),
+                            &format!("Open :{}", pub_p),
                             Some(open_url_sel),
                             Some(target),
                             true,
@@ -1041,20 +1053,19 @@ mod imp {
             );
             attach_submenu(parent_item, sub);
         } else {
-            add_menu_item(menu, "  ● Cluster: Ready (k3s)", None, None, false);
+            add_menu_item(menu, "  ● k3s cluster", None, None, false);
 
             if snapshot.k8s_services.is_empty() && snapshot.k8s_pods.is_empty() {
                 add_menu_item(menu, "  None", None, None, false);
             } else {
                 for pod in &snapshot.k8s_pods {
-                    let (bullet, status_str) = match pod.phase.as_str() {
-                        "Running" => ("●", format!("{} Running", pod.ready_summary)),
-                        "Succeeded" => ("●", "Completed".to_string()),
-                        "Pending" => ("◐", "Pending".to_string()),
-                        _ => ("⚠️", pod.phase.clone()),
+                    let bullet = match pod.phase.as_str() {
+                        "Running" | "Succeeded" => "●",
+                        "Pending" => "◐",
+                        _ => "⚠️",
                     };
-
-                    let title = format!("  {} pod/{} ({})", bullet, pod.name, status_str);
+                    let name = truncate(&pod.name, 14);
+                    let title = format!("  {} {} {}", bullet, name, pod.ready_summary);
                     let parent_item = add_menu_item(menu, &title, None, None, true);
                     let sub = create_submenu(&pod.name);
 
@@ -1083,10 +1094,11 @@ mod imp {
                 }
 
                 for svc in &snapshot.k8s_services {
+                    let name = truncate(&svc.name, 14);
                     let title = if let Some(np) = svc.node_port {
-                        format!("  ● svc/{} (:{}) ➔ :{}", svc.name, svc.port, np)
+                        format!("  ● {} :{} ➔ :{}", name, svc.port, np)
                     } else {
-                        format!("  ● svc/{} (:{} ClusterIP)", svc.name, svc.port)
+                        format!("  ● {} :{}", name, svc.port)
                     };
 
                     let parent_item = add_menu_item(menu, &title, None, None, true);
@@ -1099,7 +1111,7 @@ mod imp {
 
                         add_menu_item_with_obj(
                             sub,
-                            &format!("Open ({})", url),
+                            &format!("Open :{}", np),
                             Some(open_url_sel),
                             Some(target),
                             true,
@@ -1120,7 +1132,7 @@ mod imp {
                     let pf_sel = sel_registerName(b"onOpenK8sPortForward:\0".as_ptr() as _);
                     add_menu_item_with_obj(
                         sub,
-                        "Port Forward to Localhost",
+                        "Port Forward",
                         Some(pf_sel),
                         Some(target),
                         true,
@@ -1134,7 +1146,7 @@ mod imp {
                     let copy_sel = sel_registerName(b"onCopyText:\0".as_ptr() as _);
                     add_menu_item_with_obj(
                         sub,
-                        "Copy Port-Forward Cmd",
+                        "Copy Cmd",
                         Some(copy_sel),
                         Some(target),
                         true,
@@ -1154,7 +1166,7 @@ mod imp {
         let dash_sel = sel_registerName(b"onOpenDashboard:\0".as_ptr() as _);
         add_menu_item(
             menu,
-            "Dashboard (machctl top)",
+            "Dashboard",
             Some(dash_sel),
             Some(target),
             true,
@@ -1163,7 +1175,7 @@ mod imp {
         let open_files_sel = sel_registerName(b"onOpenFiles:\0".as_ptr() as _);
         add_menu_item(
             menu,
-            "Files (~/Mach)",
+            "Files",
             Some(open_files_sel),
             Some(target),
             true,
@@ -1180,7 +1192,7 @@ mod imp {
 
         add_separator(menu);
 
-        let quit_title = format!("Quit Mach (v{})", env!("CARGO_PKG_VERSION"));
+        let quit_title = format!("Quit (v{})", env!("CARGO_PKG_VERSION"));
         let quit_sel = sel_registerName(b"onQuit:\0".as_ptr() as _);
         add_menu_item(menu, &quit_title, Some(quit_sel), Some(target), true);
     }
