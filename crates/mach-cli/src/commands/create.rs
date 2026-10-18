@@ -134,7 +134,7 @@ pub async fn run_with_isolated(
     } else if let Some(info) = distro_info {
         // Multi-distro cloud image
         let cache_dir = cfg.data_dir.join("cache");
-        let cached_raw = images::ensure_cached_image(&cache_dir, info)?;
+        let cached_raw = images::ensure_cached_image(&cache_dir, info).await?;
 
         if !disk_path.exists() {
             println!("  \x1b[1;36m➜\x1b[0m Provisioning disk image (APFS instant clone)...");
