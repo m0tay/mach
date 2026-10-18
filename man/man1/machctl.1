@@ -1,4 +1,4 @@
-.TH MACHCTL 1 "October 2026" "Mach 0.3.0" "Machctl Manual"
+.TH MACHCTL 1 "October 2026" "Mach 0.4.0" "Machctl Manual"
 .SH NAME
 machctl \- administrative control plane for Mach Linux machines, containers, and Kubernetes
 .SH SYNOPSIS
@@ -133,6 +133,10 @@ Generate and trust a local wildcard TLS certificate authority in the macOS Keych
 .TP
 .BI daemon " start | stop | status"
 Manage the background async port forwarding and DNS routing daemon.
+
+.TP
+.BI uninstall " [" \-\-all "] [" \-\-force "] [" \-\-keep\-data "]"
+Completely uninstall Mach, stop all VMs and daemons, reset Docker and Kubernetes contexts, restore ~/.ssh/config, remove TLS certificates, and clean up ~/.mach data.
 
 .TP
 .BI version

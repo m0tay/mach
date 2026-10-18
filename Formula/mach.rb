@@ -1,8 +1,8 @@
 class Mach < Formula
   desc "Supersonic Linux virtualization & container engine for Apple Silicon"
   homepage "https://github.com/douglaslobo/mach"
-  url "file:///Users/douglaslobo/Developer/mach/dist/mach-0.3.0-aarch64-apple-darwin.tar.gz"
-  sha256 "14be75bafbaf7c64d8a716ec7f978b3ec01ffc424b571f0e9a3656ce16757773"
+  url "file:///Users/douglaslobo/Developer/mach/dist/mach-0.4.0-aarch64-apple-darwin.tar.gz"
+  sha256 "16bd2fd92a22f8becab1d2e2a0747d81673b6b1442f61005201801c6bc707f60"
   license "MIT"
 
   depends_on arch: :arm64
@@ -42,6 +42,10 @@ class Mach < Formula
         • Activity dashboard:       machctl top
         • Open files in Finder:     open ~/Mach
         • macOS Menu bar:           mach menu
+
+      To completely uninstall Mach and all stored data:
+        machctl uninstall --all
+        brew uninstall mach
     EOS
   end
 

@@ -37,6 +37,7 @@ pub mod stop;
 pub mod tls_cmd;
 pub mod top;
 pub mod update;
+pub mod uninstall;
 pub mod version;
 
 use anyhow::{bail, Context, Result};

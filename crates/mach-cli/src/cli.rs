@@ -408,6 +408,21 @@ pub enum Commands {
     /// Check for and apply Mach updates (Homebrew or binary)
     Update,
 
+    /// Completely uninstall Mach, stop all VMs, and clean up system integration
+    Uninstall {
+        /// Delete all stored virtual machine disks, images, and ~/.mach data directory
+        #[arg(short, long)]
+        all: bool,
+
+        /// Non-interactive mode (do not prompt for confirmation)
+        #[arg(short, long)]
+        force: bool,
+
+        /// Keep stored machine disk images and data directory
+        #[arg(long)]
+        keep_data: bool,
+    },
+
     /// Internal command to execute the virtual machine process in the background
     #[command(hide = true)]
     RunVm {

@@ -171,6 +171,46 @@ pub fn sync_ssh_config_to_dir(ssh_dir: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// Remove any Mach managed block from `~/.ssh/config`.
+pub fn remove_mach_ssh_config_from_dir(ssh_dir: &std::path::Path) -> Result<()> {
+    let config_path = ssh_dir.join("config");
+    if !config_path.exists() {
+        return Ok(());
+    }
+
+    let text = fs::read_to_string(&config_path)
+        .with_context(|| format!("failed to read {}", config_path.display()))?;
+
+    const BEGIN_MARKER: &str = "# BEGIN MACH MANAGED BLOCK";
+    const END_MARKER: &str = "# END MACH MANAGED BLOCK";
+    const LEGACY_BEGIN_MARKER: &str = "# BEGIN NORB MANAGED BLOCK";
+    const LEGACY_END_MARKER: &str = "# END NORB MANAGED BLOCK";
+
+    let mut cleaned = text.clone();
+    for (begin, end) in &[(BEGIN_MARKER, END_MARKER), (LEGACY_BEGIN_MARKER, LEGACY_END_MARKER)] {
+        if let (Some(start), Some(finish)) = (cleaned.find(begin), cleaned.find(end)) {
+            if start <= finish {
+                let block_end = finish + end.len();
+                let mut res = String::new();
+                res.push_str(&cleaned[..start]);
+                res.push_str(&cleaned[block_end..]);
+                cleaned = res;
+            }
+        }
+    }
+
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        let _ = fs::remove_file(&config_path);
+    } else {
+        let mut final_text = trimmed.to_string();
+        final_text.push('\n');
+        fs::write(&config_path, final_text.as_bytes())?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

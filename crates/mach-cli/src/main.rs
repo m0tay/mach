@@ -106,6 +106,7 @@ System & Infrastructure:
   tls         Manage local wildcard TLS certificates (*.mach.local)
   menu        Launch native macOS menu bar status item ( mach)
   setup       Run initial onboarding and environment setup
+  uninstall   Completely uninstall Mach and clean up all system integration
   version     Show mach version
 
 Flags:
@@ -284,6 +285,7 @@ async fn main() -> Result<()> {
             let ctl_only_commands = [
                 "doctor", "inspect", "dump", "top", "config", "daemon", "dns", "tls",
                 "mount", "code", "link", "debug", "export", "import", "clone", "rename",
+                "uninstall",
             ];
             if ctl_only_commands.contains(&first_arg.as_str()) {
                 eprintln!(
@@ -315,7 +317,7 @@ async fn main() -> Result<()> {
             "inspect", "dump",
             "status", "top", "logs", "ssh", "push", "pull", "docker", "daemon",
             "dns", "doctor", "config", "version", "update", "boot", "run-vm", "debug",
-            "mount", "code", "k8s", "link", "tls", "completion", "menu", "setup", "init", "help",
+            "mount", "code", "k8s", "link", "tls", "completion", "menu", "setup", "init", "uninstall", "help",
             "--help", "-h", "--version", "-V",
         ];
 
@@ -565,6 +567,9 @@ async fn main() -> Result<()> {
         }
         Commands::Update => {
             commands::update::run().await?;
+        }
+        Commands::Uninstall { all, force, keep_data } => {
+            commands::uninstall::run(all, force, keep_data).await?;
         }
         Commands::RunVm {
             name,

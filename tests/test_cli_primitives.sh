@@ -40,11 +40,15 @@ echo -e "${BLUE}======================================================${NC}\n"
 echo -e "${YELLOW}[1/15] Testing version and help output...${NC}"
 VER_OUT=$(mach version)
 assert_contains "$VER_OUT" "mach" "mach version returns valid header"
-assert_contains "$VER_OUT" "0.3.0" "mach version returns semantic version"
+assert_contains "$VER_OUT" "0.4.0" "mach version returns semantic version"
 
 HELP_OUT=$(machctl --help)
 assert_contains "$HELP_OUT" "Linux machines:" "machctl --help lists Linux machines group"
 assert_contains "$HELP_OUT" "Containers:" "machctl --help lists Containers group"
+assert_contains "$HELP_OUT" "uninstall" "machctl --help lists uninstall command"
+
+UNINSTALL_REDIR=$(mach uninstall 2>&1 || true)
+assert_contains "$UNINSTALL_REDIR" "machctl uninstall" "mach uninstall provides clean guidance to machctl"
 
 # 2. Doctor test
 echo -e "\n${YELLOW}[2/15] Testing system doctor health checks...${NC}"
