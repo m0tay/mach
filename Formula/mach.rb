@@ -1,8 +1,8 @@
 class Mach < Formula
   desc "Supersonic Linux virtualization & container engine for Apple Silicon"
   homepage "https://github.com/douglaslobo/mach"
-  url "file:///Users/douglaslobo/Developer/mach/dist/mach-0.5.0-aarch64-apple-darwin.tar.gz"
-  sha256 "026835ad6445d91a0da72a67d015d2f38707803e6aba00be4dc970162fb398f8"
+  url "file:///Users/douglaslobo/Developer/mach/dist/mach-0.6.0-aarch64-apple-darwin.tar.gz"
+  sha256 "75f0c9cda556e75aef4078667ebafe98fba14408d6f8aa57088fafe9d5180bdc"
   license "MIT"
 
   depends_on arch: :arm64
@@ -18,6 +18,9 @@ class Mach < Formula
     # Install man pages
     man1.install "man/man1/mach.1"
     man1.install "man/man1/machctl.1"
+
+    # Strip quarantine if present
+    system "/usr/bin/xattr", "-cr", "."
 
     # Codesign with hypervisor and virtualization entitlements
     system "codesign", "--force", "--entitlements", "entitlements.plist", "--sign", "-", bin/"mach"

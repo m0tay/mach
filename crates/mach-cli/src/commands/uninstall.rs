@@ -72,6 +72,8 @@ pub async fn run(all: bool, force: bool, keep_data: bool) -> Result<()> {
     println!("  \x1b[1;36m➜\x1b[0m Stopping background daemon and menu bar status item...");
     let _ = super::daemon::stop_daemon();
     super::menu_cmd::stop_menu_bar();
+    let _ = Command::new("pkill").args(["-9", "-f", "mach menu"]).output();
+    let _ = Command::new("pkill").args(["-9", "-f", "machctl menu"]).output();
     let _ = Command::new("pkill").args(["-f", "dns-sd.*mach.local"]).output();
     println!("  \x1b[1;32m✓\x1b[0m Background daemons terminated");
 

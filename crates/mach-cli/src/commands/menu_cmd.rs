@@ -26,16 +26,53 @@ pub fn is_menu_running(run_dir: &Path) -> Option<u32> {
 
 /// Terminate any running macOS menu bar status item process.
 pub fn stop_menu_bar() {
+    let my_pid = std::process::id();
+
+    // 1. Check PID file in data_dir and ~/.mach/run fallback
+    let mut check_dirs = Vec::new();
     if let Ok(cfg) = MachConfig::load() {
-        let run_dir = cfg.data_dir.join("run");
+        check_dirs.push(cfg.data_dir.join("run"));
+    }
+    if let Some(home) = dirs::home_dir() {
+        check_dirs.push(home.join(".mach/run"));
+    }
+    for run_dir in check_dirs {
         if let Some(pid) = is_menu_running(&run_dir) {
-            let _ = nix::sys::signal::kill(
-                nix::unistd::Pid::from_raw(pid as i32),
-                nix::sys::signal::Signal::SIGTERM,
-            );
+            if pid != my_pid {
+                let _ = nix::sys::signal::kill(
+                    nix::unistd::Pid::from_raw(pid as i32),
+                    nix::sys::signal::Signal::SIGKILL,
+                );
+            }
             let _ = fs::remove_file(run_dir.join("menu.pid"));
         }
     }
+
+    // 2. Scan process table for any running `mach menu` or `machctl menu`
+    if let Ok(output) = Command::new("ps").args(["-eo", "pid,command"]).output() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let has_menu = line.contains("mach menu")
+                || line.contains("machctl menu")
+                || (line.contains("mach") && line.contains(" menu"));
+            if has_menu && !line.contains("grep") {
+                if let Some(pid_str) = line.split_whitespace().next() {
+                    if let Ok(pid) = pid_str.parse::<i32>() {
+                        if pid as u32 != my_pid {
+                            let _ = nix::sys::signal::kill(
+                                nix::unistd::Pid::from_raw(pid),
+                                nix::sys::signal::Signal::SIGKILL,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Direct pkill to terminate any lingering menu bar worker instances
+    let _ = Command::new("pkill").args(["-9", "-f", "mach menu"]).output();
+    let _ = Command::new("pkill").args(["-9", "-f", "machctl menu"]).output();
 }
 
 /// Check if any machines are currently in Running state.
