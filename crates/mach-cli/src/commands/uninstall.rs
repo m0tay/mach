@@ -7,8 +7,30 @@
 use anyhow::Result;
 use mach_common::config::MachConfig;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+fn find_binary_executable(name: &str) -> Option<PathBuf> {
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            let p = dir.join(name);
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
+    let mut candidates = vec![
+        PathBuf::from(format!("/opt/homebrew/bin/{name}")),
+        PathBuf::from(format!("/usr/local/bin/{name}")),
+        PathBuf::from(format!("/usr/bin/{name}")),
+    ];
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(format!(".rd/bin/{name}")));
+        candidates.push(home.join(format!(".orbstack/bin/{name}")));
+        candidates.push(home.join(format!(".colima/bin/{name}")));
+    }
+    candidates.into_iter().find(|p| p.is_file())
+}
 
 pub async fn run(all: bool, force: bool, keep_data: bool) -> Result<()> {
     println!("\x1b[1;36m➜\x1b[0m Preparing to uninstall Mach...");
@@ -50,6 +72,7 @@ pub async fn run(all: bool, force: bool, keep_data: bool) -> Result<()> {
     println!("  \x1b[1;36m➜\x1b[0m Stopping background daemon and menu bar status item...");
     let _ = super::daemon::stop_daemon();
     super::menu_cmd::stop_menu_bar();
+    let _ = Command::new("pkill").args(["-f", "dns-sd.*mach.local"]).output();
     println!("  \x1b[1;32m✓\x1b[0m Background daemons terminated");
 
     // 3. Terminate background tunnels
@@ -58,8 +81,45 @@ pub async fn run(all: bool, force: bool, keep_data: bool) -> Result<()> {
 
     // 4. Clean up Docker CLI integration
     println!("  \x1b[1;36m➜\x1b[0m Cleaning up Docker CLI context and sockets...");
-    let _ = Command::new("docker").args(["context", "use", "default"]).output();
-    let _ = Command::new("docker").args(["context", "rm", "-f", "mach"]).output();
+    if let Some(bin) = find_binary_executable("docker") {
+        let _ = Command::new(bin).args(["context", "use", "default"]).output();
+        let _ = Command::new(find_binary_executable("docker").unwrap_or_else(|| std::path::PathBuf::from("docker")))
+            .args(["context", "rm", "-f", "mach"])
+            .output();
+    }
+    // Directly cleanse ~/.docker/config.json and context metadata
+    if let Some(home) = dirs::home_dir() {
+        let docker_cfg = home.join(".docker/config.json");
+        if let Ok(content) = std::fs::read_to_string(&docker_cfg) {
+            if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(&content) {
+                let mut modified = false;
+                if let Some(ctx) = val.get("currentContext").and_then(|c| c.as_str()) {
+                    if ctx == "mach" {
+                        if let Some(obj) = val.as_object_mut() {
+                            obj.insert("currentContext".to_string(), serde_json::Value::String("default".to_string()));
+                            modified = true;
+                        }
+                    }
+                }
+                if modified {
+                    if let Ok(serialized) = serde_json::to_string_pretty(&val) {
+                        let _ = std::fs::write(&docker_cfg, serialized);
+                    }
+                }
+            }
+        }
+        let meta_dir = home.join(".docker/contexts/meta");
+        if let Ok(entries) = std::fs::read_dir(meta_dir) {
+            for entry in entries.flatten() {
+                let meta_file = entry.path().join("meta.json");
+                if let Ok(txt) = std::fs::read_to_string(&meta_file) {
+                    if txt.contains("\"Name\":\"mach\"") || txt.contains("\"Name\": \"mach\"") {
+                        let _ = std::fs::remove_dir_all(entry.path());
+                    }
+                }
+            }
+        }
+    }
 
     let sys_sock = Path::new("/var/run/docker.sock");
     if sys_sock.is_symlink() {
@@ -74,9 +134,11 @@ pub async fn run(all: bool, force: bool, keep_data: bool) -> Result<()> {
 
     // 5. Clean up Kubernetes CLI integration
     println!("  \x1b[1;36m➜\x1b[0m Cleaning up Kubernetes configuration...");
-    let _ = Command::new("kubectl").args(["config", "delete-context", "mach"]).output();
-    let _ = Command::new("kubectl").args(["config", "delete-cluster", "mach"]).output();
-    let _ = Command::new("kubectl").args(["config", "delete-user", "mach"]).output();
+    if let Some(bin) = find_binary_executable("kubectl") {
+        let _ = Command::new(&bin).args(["config", "delete-context", "mach"]).output();
+        let _ = Command::new(&bin).args(["config", "delete-cluster", "mach"]).output();
+        let _ = Command::new(&bin).args(["config", "delete-user", "mach"]).output();
+    }
     if let Some(home) = dirs::home_dir() {
         let _ = std::fs::remove_file(home.join(".kube/config.mach"));
     }
@@ -107,14 +169,24 @@ pub async fn run(all: bool, force: bool, keep_data: bool) -> Result<()> {
     // 9. Wipe data directories if requested or default full uninstall
     if all || !keep_data {
         println!("  \x1b[1;36m➜\x1b[0m Removing ~/.mach data and ~/Mach Finder mount...");
+        if let Some(home) = dirs::home_dir() {
+            let finder_dir = home.join("Mach");
+            if finder_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(finder_dir.join("machines")) {
+                    for entry in entries.flatten() {
+                        let _ = crate::nfs::unmount(&entry.path(), true);
+                    }
+                }
+                let _ = crate::nfs::unmount(&finder_dir, true);
+                let _ = std::fs::remove_dir_all(&finder_dir);
+            }
+        }
         if let Some(ref cfg) = cfg_opt {
             let _ = std::fs::remove_dir_all(&cfg.data_dir);
         }
         if let Some(home) = dirs::home_dir() {
             let mach_dir = home.join(".mach");
             let _ = std::fs::remove_dir_all(&mach_dir);
-            let finder_dir = home.join("Mach");
-            let _ = std::fs::remove_dir_all(&finder_dir);
         }
         println!("  \x1b[1;32m✓\x1b[0m Removed ~/.mach and ~/Mach");
     } else {

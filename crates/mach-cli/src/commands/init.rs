@@ -77,25 +77,23 @@ pub async fn run(non_interactive: bool) -> Result<()> {
     println!("  \x1b[1;32m✓\x1b[0m Safely integrated with ~/.ssh/config (user hosts and keys preserved)");
 
     // 5. Docker CLI Context (if Docker CLI exists)
-    let docker_check = Command::new("docker").arg("--version").output();
-    if let Ok(out) = docker_check {
-        if out.status.success() {
-            let sock_path = mach_dir.join("run").join("docker.sock");
-            let _ = Command::new("docker").args(["context", "rm", "-f", "mach"]).output();
-            let _ = Command::new("docker")
-                .args([
-                    "context",
-                    "create",
-                    "mach",
-                    "--docker",
-                    &format!("host=unix://{}", sock_path.display()),
-                    "--description",
-                    "mach Docker Engine (Apple Silicon)",
-                ])
-                .output();
-            let _ = Command::new("docker").args(["context", "use", "mach"]).output();
-            println!("  \x1b[1;32m✓\x1b[0m Docker CLI context 'mach' configured (unix://{})", sock_path.display());
-        }
+    let docker_bin = super::find_binary("docker");
+    if let Some(ref bin) = docker_bin {
+        let sock_path = mach_dir.join("run").join("docker.sock");
+        let _ = Command::new(bin).args(["context", "rm", "-f", "mach"]).output();
+        let _ = Command::new(bin)
+            .args([
+                "context",
+                "create",
+                "mach",
+                "--docker",
+                &format!("host=unix://{}", sock_path.display()),
+                "--description",
+                "mach Docker Engine (Apple Silicon)",
+            ])
+            .output();
+        let _ = Command::new(bin).args(["context", "use", "mach"]).output();
+        println!("  \x1b[1;32m✓\x1b[0m Docker CLI context 'mach' configured (unix://{})", sock_path.display());
     } else {
         println!("  - Docker CLI not detected on macOS (run 'machctl docker setup' when installed)");
     }

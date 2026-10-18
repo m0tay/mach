@@ -57,6 +57,30 @@ pub fn machine_file_path(machines_dir: &Path, name: &str) -> PathBuf {
     }
 }
 
+/// Locate a binary on macOS looking in PATH, Homebrew, /usr/local, and common user tool locations.
+pub fn find_binary(name: &str) -> Option<PathBuf> {
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            let p = dir.join(name);
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
+    let mut candidates = vec![
+        PathBuf::from(format!("/opt/homebrew/bin/{name}")),
+        PathBuf::from(format!("/usr/local/bin/{name}")),
+        PathBuf::from(format!("/usr/bin/{name}")),
+    ];
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(format!(".rd/bin/{name}")));
+        candidates.push(home.join(format!(".orbstack/bin/{name}")));
+        candidates.push(home.join(format!(".colima/bin/{name}")));
+        candidates.push(home.join(format!(".docker/bin/{name}")));
+    }
+    candidates.into_iter().find(|p| p.is_file())
+}
+
 /// Load all machines from the machines directory (supports both YAML and JSON with auto-migration).
 pub fn load_all_machines(machines_dir: &Path) -> Result<Vec<Machine>> {
     if !machines_dir.exists() {

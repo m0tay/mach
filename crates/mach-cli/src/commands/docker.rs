@@ -134,9 +134,10 @@ pub async fn setup(system: bool) -> Result<()> {
 
     // 5. Configure Docker context
     println!("\x1b[1;36m➜\x1b[0m Configuring Docker CLI context for mach...");
-    let _ = Command::new("docker").args(["context", "rm", "-f", "mach"]).output();
+    let docker_bin = super::find_binary("docker").unwrap_or_else(|| std::path::PathBuf::from("docker"));
+    let _ = Command::new(&docker_bin).args(["context", "rm", "-f", "mach"]).output();
 
-    let output = Command::new("docker")
+    let output = Command::new(&docker_bin)
         .args([
             "context",
             "create",
@@ -149,7 +150,7 @@ pub async fn setup(system: bool) -> Result<()> {
         .output()?;
 
     if output.status.success() {
-        let _ = Command::new("docker").args(["context", "use", "mach"]).output();
+        let _ = Command::new(&docker_bin).args(["context", "use", "mach"]).output();
         println!("\x1b[1;32m✓\x1b[0m Docker context \x1b[1mmach\x1b[0m configured and activated!");
         println!("  Endpoint: \x1b[1;34munix://{}\x1b[0m", sock_path.display());
     } else {

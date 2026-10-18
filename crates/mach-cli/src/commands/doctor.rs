@@ -186,7 +186,8 @@ pub async fn run() -> Result<()> {
     }
 
     // 9. Docker Context
-    let context_out = Command::new("docker").args(["context", "ls"]).output();
+    let docker_bin = super::find_binary("docker").unwrap_or_else(|| std::path::PathBuf::from("docker"));
+    let context_out = Command::new(docker_bin).args(["context", "ls"]).output();
     if let Ok(out) = context_out {
         let stdout = String::from_utf8_lossy(&out.stdout);
         if stdout.contains("mach") {
