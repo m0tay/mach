@@ -141,9 +141,13 @@ async fn main() -> Result<()> {
         let user_machines: Vec<_> = machines.iter().filter(|m| !m.is_system()).collect();
 
         if user_machines.is_empty() {
-            println!("No user machines found. Welcome to mach! Starting initial environment setup...\n");
-            commands::setup::run(true).await?;
-            return Ok(());
+            println!("No Linux machine found. Preparing your environment...");
+            commands::setup::run(false).await?;
+            println!("\x1b[1;32m✓\x1b[0m Environment ready!\n");
+
+            let cfg = MachConfig::load()?;
+            let target_name = cfg.default_machine.clone().unwrap_or_else(|| "debian".to_string());
+            return commands::shell::run(Some(&target_name), false, &[]).await;
         }
 
         let target_name = if let Some(ref def) = cfg.default_machine {

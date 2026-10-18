@@ -93,6 +93,7 @@ pub struct ProgressBar {
     is_tty: bool,
     finished: bool,
     smoothed_speed: f64,
+    to_stderr: bool,
 }
 
 impl ProgressBar {
@@ -105,27 +106,57 @@ impl ProgressBar {
     pub fn subtitle(&self) -> Option<&str> {
         self.subtitle.as_deref()
     }
-    /// Create a new progress bar.
+
+    /// Create a new progress bar rendering to stdout.
+    pub fn new(title: String, subtitle: Option<String>, total_bytes: Option<u64>) -> Self {
+        Self::new_ext(title, subtitle, total_bytes, false)
+    }
+
+    /// Create a new progress bar, optionally directing output to stderr.
     ///
     /// - `title`: Name of the item being downloaded (e.g. "Debian 12 (Bookworm)")
     /// - `subtitle`: Optional network metadata (e.g. "Cloudflare CDN · 14ms")
     /// - `total_bytes`: Optional total file size in bytes
-    pub fn new(title: String, subtitle: Option<String>, total_bytes: Option<u64>) -> Self {
+    /// - `to_stderr`: If true, render to stderr instead of stdout (for transparent command pipelines)
+    pub fn new_ext(
+        title: String,
+        subtitle: Option<String>,
+        total_bytes: Option<u64>,
+        to_stderr: bool,
+    ) -> Self {
         ensure_cursor_guards();
-        let is_tty = io::stdout().is_terminal();
+        let is_tty = if to_stderr {
+            io::stderr().is_terminal()
+        } else {
+            io::stdout().is_terminal()
+        };
 
         if is_tty {
             // Hide cursor immediately to prevent jitter
-            print!("\x1b[?25l");
-            let _ = io::stdout().flush();
+            if to_stderr {
+                eprint!("\x1b[?25l");
+                let _ = io::stderr().flush();
+            } else {
+                print!("\x1b[?25l");
+                let _ = io::stdout().flush();
+            }
         }
 
         // Print header line
         if let Some(ref sub) = subtitle {
-            println!(
-                "  \x1b[1;36m➜\x1b[0m Downloading \x1b[1m{}\x1b[0m \x1b[90m[{}]\x1b[0m",
-                title, sub
-            );
+            if to_stderr {
+                eprintln!(
+                    "  \x1b[1;36m➜\x1b[0m Downloading \x1b[1m{}\x1b[0m \x1b[90m[{}]\x1b[0m",
+                    title, sub
+                );
+            } else {
+                println!(
+                    "  \x1b[1;36m➜\x1b[0m Downloading \x1b[1m{}\x1b[0m \x1b[90m[{}]\x1b[0m",
+                    title, sub
+                );
+            }
+        } else if to_stderr {
+            eprintln!("  \x1b[1;36m➜\x1b[0m Downloading \x1b[1m{}\x1b[0m", title);
         } else {
             println!("  \x1b[1;36m➜\x1b[0m Downloading \x1b[1m{}\x1b[0m", title);
         }
@@ -144,6 +175,7 @@ impl ProgressBar {
             is_tty,
             finished: false,
             smoothed_speed: 0.0,
+            to_stderr,
         };
 
         if pb.is_tty {
@@ -229,10 +261,17 @@ impl ProgressBar {
                 "--s".to_string()
             };
 
-            print!(
-                "\r\x1b[2K    \x1b[1;36m{}\x1b[0m\x1b[90m{}\x1b[0m  \x1b[1m{:3}%\x1b[0m  {:>6} / {:<6}  \x1b[2m({}, {})\x1b[0m",
-                filled_str, empty_str, percent, cur_str, tot_str, speed_str, eta_str
-            );
+            if self.to_stderr {
+                eprint!(
+                    "\r\x1b[2K    \x1b[1;36m{}\x1b[0m\x1b[90m{}\x1b[0m  \x1b[1m{:3}%\x1b[0m  {:>6} / {:<6}  \x1b[2m({}, {})\x1b[0m",
+                    filled_str, empty_str, percent, cur_str, tot_str, speed_str, eta_str
+                );
+            } else {
+                print!(
+                    "\r\x1b[2K    \x1b[1;36m{}\x1b[0m\x1b[90m{}\x1b[0m  \x1b[1m{:3}%\x1b[0m  {:>6} / {:<6}  \x1b[2m({}, {})\x1b[0m",
+                    filled_str, empty_str, percent, cur_str, tot_str, speed_str, eta_str
+                );
+            }
         } else {
             // Indeterminate / pulse animation
             let pulse_pos = (overall_elapsed * 12.0) as usize % self.bar_width;
@@ -247,13 +286,24 @@ impl ProgressBar {
                 }
             }
             let cur_str = format_bytes(self.current_bytes);
-            print!(
-                "\r\x1b[2K    \x1b[1;36m{}\x1b[0m  {:>7}  \x1b[2m({})\x1b[0m",
-                bar, cur_str, speed_str
-            );
+            if self.to_stderr {
+                eprint!(
+                    "\r\x1b[2K    \x1b[1;36m{}\x1b[0m  {:>7}  \x1b[2m({})\x1b[0m",
+                    bar, cur_str, speed_str
+                );
+            } else {
+                print!(
+                    "\r\x1b[2K    \x1b[1;36m{}\x1b[0m  {:>7}  \x1b[2m({})\x1b[0m",
+                    bar, cur_str, speed_str
+                );
+            }
         }
 
-        let _ = io::stdout().flush();
+        if self.to_stderr {
+            let _ = io::stderr().flush();
+        } else {
+            let _ = io::stdout().flush();
+        }
         self.last_render_time = now;
         self.last_render_bytes = self.current_bytes;
     }
@@ -267,12 +317,19 @@ impl ProgressBar {
 
         if self.is_tty {
             // Clear the active progress line completely
-            print!("\r\x1b[2K");
-            // Print clean final summary
-            println!("  \x1b[1;32m✓\x1b[0m \x1b[1m{}\x1b[0m", message);
-            // Restore terminal cursor
-            print!("\x1b[?25h");
-            let _ = io::stdout().flush();
+            if self.to_stderr {
+                eprint!("\r\x1b[2K");
+                eprintln!("  \x1b[1;32m✓\x1b[0m \x1b[1m{}\x1b[0m", message);
+                eprint!("\x1b[?25h");
+                let _ = io::stderr().flush();
+            } else {
+                print!("\r\x1b[2K");
+                println!("  \x1b[1;32m✓\x1b[0m \x1b[1m{}\x1b[0m", message);
+                print!("\x1b[?25h");
+                let _ = io::stdout().flush();
+            }
+        } else if self.to_stderr {
+            eprintln!("  ✓ {}", message);
         } else {
             println!("  ✓ {}", message);
         }
@@ -284,15 +341,25 @@ impl Drop for ProgressBar {
         if !self.finished {
             if self.is_tty {
                 // Erase active progress line
-                print!("\r\x1b[2K");
-                let _ = io::stdout().flush();
+                if self.to_stderr {
+                    eprint!("\r\x1b[2K");
+                    let _ = io::stderr().flush();
+                } else {
+                    print!("\r\x1b[2K");
+                    let _ = io::stdout().flush();
+                }
             }
             self.finished = true;
         }
         if self.is_tty {
             // GUARANTEE cursor is restored even on error, early exit, or panic
-            print!("\x1b[?25h");
-            let _ = io::stdout().flush();
+            if self.to_stderr {
+                eprint!("\x1b[?25h");
+                let _ = io::stderr().flush();
+            } else {
+                print!("\x1b[?25h");
+                let _ = io::stdout().flush();
+            }
         }
     }
 }

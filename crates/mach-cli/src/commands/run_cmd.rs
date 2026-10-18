@@ -36,6 +36,22 @@ pub async fn run(
         return super::shell::run(target_name_opt, system, &[]).await;
     }
 
+    let cfg = if !system {
+        let all_machines = super::load_all_machines(&cfg.machines_dir)?;
+        let user_machines: Vec<_> = all_machines.into_iter().filter(|m| !m.is_system()).collect();
+
+        if user_machines.is_empty() {
+            eprintln!("No Linux machine found. Preparing your environment...");
+            crate::commands::setup::run_streamlined(true).await?;
+            eprintln!("\x1b[1;32m✓\x1b[0m Environment ready!\n");
+            MachConfig::load()?
+        } else {
+            cfg
+        }
+    } else {
+        cfg
+    };
+
     let mut machine = super::resolve_target_machine_ext(&cfg, target_name_opt, system)?;
 
     // Auto-start if stopped: send all progress to stderr for clean stdout composability

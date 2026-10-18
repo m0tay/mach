@@ -18,7 +18,7 @@ pub async fn run(
     arch_str: &str,
 ) -> Result<()> {
     let isolated = std::env::args().any(|arg| arg == "--isolated");
-    run_with_isolated(distro, name, cpus, memory, disk, arch_str, isolated).await
+    run_ext(distro, name, cpus, memory, disk, arch_str, isolated, true, false).await
 }
 
 pub async fn run_with_isolated(
@@ -30,6 +30,30 @@ pub async fn run_with_isolated(
     arch_str: &str,
     isolated: bool,
 ) -> Result<()> {
+    run_ext(distro, name, cpus, memory, disk, arch_str, isolated, true, false).await
+}
+
+pub async fn run_ext(
+    distro: &str,
+    name: Option<&str>,
+    cpus: u32,
+    memory: u64,
+    disk: u64,
+    arch_str: &str,
+    isolated: bool,
+    show_next_steps: bool,
+    to_stderr: bool,
+) -> Result<()> {
+    macro_rules! out_ln {
+        ($($arg:tt)*) => {
+            if to_stderr {
+                eprintln!($($arg)*);
+            } else {
+                println!($($arg)*);
+            }
+        };
+    }
+
     let mut cfg = MachConfig::load()?;
 
     let mut existing_names = HashSet::new();
@@ -89,14 +113,14 @@ pub async fn run_with_isolated(
         );
     }
 
-    println!("\x1b[1;36m➜\x1b[0m Creating machine \x1b[1m{}\x1b[0m...", machine_name);
-    println!("  Distribution: \x1b[33m{}\x1b[0m", distro);
-    println!("  Architecture: \x1b[33m{}\x1b[0m", arch);
-    println!("  CPUs:         \x1b[33m{}\x1b[0m", cpus);
-    println!("  Memory:       \x1b[33m{} MiB\x1b[0m", memory);
-    println!("  Disk:         \x1b[33m{} GiB\x1b[0m", disk);
+    out_ln!("\x1b[1;36m➜\x1b[0m Creating machine \x1b[1m{}\x1b[0m...", machine_name);
+    out_ln!("  Distribution: \x1b[33m{}\x1b[0m", distro);
+    out_ln!("  Architecture: \x1b[33m{}\x1b[0m", arch);
+    out_ln!("  CPUs:         \x1b[33m{}\x1b[0m", cpus);
+    out_ln!("  Memory:       \x1b[33m{} MiB\x1b[0m", memory);
+    out_ln!("  Disk:         \x1b[33m{} GiB\x1b[0m", disk);
     if isolated {
-        println!("  Isolated:     \x1b[33mtrue (host file sharing disabled)\x1b[0m");
+        out_ln!("  Isolated:     \x1b[33mtrue (host file sharing disabled)\x1b[0m");
     }
 
     let is_sys = machine_name == "mach-docker"
@@ -134,10 +158,10 @@ pub async fn run_with_isolated(
     } else if let Some(info) = distro_info {
         // Multi-distro cloud image
         let cache_dir = cfg.data_dir.join("cache");
-        let cached_raw = images::ensure_cached_image(&cache_dir, info).await?;
+        let cached_raw = images::ensure_cached_image_ext(&cache_dir, info, to_stderr).await?;
 
         if !disk_path.exists() {
-            println!("  \x1b[1;36m➜\x1b[0m Provisioning disk image (APFS instant clone)...");
+            out_ln!("  \x1b[1;36m➜\x1b[0m Provisioning disk image (APFS instant clone)...");
             mach_common::fs::apfs_clone(&cached_raw, &disk_path)?;
 
             // Expand disk to requested size
@@ -147,7 +171,7 @@ pub async fn run_with_isolated(
 
         // Generate cloud-init seed disk
         let cidata_path = machine_dir.join("cidata.iso");
-        println!("  \x1b[1;36m➜\x1b[0m Generating cloud-init seed configuration...");
+        out_ln!("  \x1b[1;36m➜\x1b[0m Generating cloud-init seed configuration...");
         cloud_init::generate_cidata_iso(&machine.id, &machine_name, &cidata_path)?;
     }
 
@@ -158,16 +182,18 @@ pub async fn run_with_isolated(
         cfg.save()?;
     }
 
-    println!(
+    out_ln!(
         "\x1b[1;32m✓\x1b[0m Machine \x1b[1m{}\x1b[0m created successfully (id: {}).",
         machine_name,
         machine.short_id()
     );
-    println!("\nNext steps:");
-    println!("  ➜ To start machine:   \x1b[1;34mmach start {}\x1b[0m", machine_name);
-    println!("  ➜ To open shell:      \x1b[1;32mmach\x1b[0m (or \x1b[1;32mmach shell {}\x1b[0m)", machine_name);
-    println!("  ➜ To run commands:    \x1b[1;32mmach uname -a\x1b[0m");
-    println!("  ➜ To view dashboard:  \x1b[1;34mmachctl top\x1b[0m");
+    if show_next_steps {
+        out_ln!("\nNext steps:");
+        out_ln!("  ➜ To start machine:   \x1b[1;34mmach start {}\x1b[0m", machine_name);
+        out_ln!("  ➜ To open shell:      \x1b[1;32mmach\x1b[0m (or \x1b[1;32mmach shell {}\x1b[0m)", machine_name);
+        out_ln!("  ➜ To run commands:    \x1b[1;32mmach uname -a\x1b[0m");
+        out_ln!("  ➜ To view dashboard:  \x1b[1;34mmachctl top\x1b[0m");
+    }
 
     Ok(())
 }

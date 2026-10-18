@@ -61,6 +61,7 @@ fn download_and_extract(
     format: &ImageFormat,
     distro_name: &str,
     mirror_label: &str,
+    to_stderr: bool,
 ) -> Result<()> {
     let meta = progress::probe_remote_url(url);
     let tag = if meta.provider_tag.is_empty() {
@@ -69,10 +70,11 @@ fn download_and_extract(
         format!("{} · {}", mirror_label, meta.provider_tag)
     };
 
-    let mut pb = progress::ProgressBar::new(
+    let mut pb = progress::ProgressBar::new_ext(
         distro_name.to_string(),
         Some(tag),
         meta.content_length,
+        to_stderr,
     );
 
     match format {
@@ -291,13 +293,31 @@ fn download_and_extract(
 }
 
 pub async fn ensure_cached_image(cache_dir: &Path, distro: &DistroImage) -> Result<PathBuf> {
+    ensure_cached_image_ext(cache_dir, distro, false).await
+}
+
+pub async fn ensure_cached_image_ext(
+    cache_dir: &Path,
+    distro: &DistroImage,
+    to_stderr: bool,
+) -> Result<PathBuf> {
+    macro_rules! out_ln {
+        ($($arg:tt)*) => {
+            if to_stderr {
+                eprintln!($($arg)*);
+            } else {
+                println!($($arg)*);
+            }
+        };
+    }
+
     fs::create_dir_all(cache_dir)?;
     let target_file = cache_dir.join(distro.filename);
     if target_file.exists() && target_file.metadata()?.len() > 1024 * 1024 {
         return Ok(target_file);
     }
 
-    println!("  \x1b[1;36m➜\x1b[0m Probing mirrors for \x1b[1m{}\x1b[0m...", distro.display_name);
+    out_ln!("  \x1b[1;36m➜\x1b[0m Probing mirrors for \x1b[1m{}\x1b[0m...", distro.display_name);
 
     let ranked_mirrors = if !distro.mirrors.is_empty() {
         crate::mirrors::rank_mirrors(distro.mirrors).await
@@ -307,14 +327,14 @@ pub async fn ensure_cached_image(cache_dir: &Path, distro: &DistroImage) -> Resu
 
     if let Some((best, lat)) = ranked_mirrors.first() {
         if let Some(duration) = lat {
-            println!(
+            out_ln!(
                 "  \x1b[1;32m✓\x1b[0m Selected fastest mirror: \x1b[1m{}\x1b[0m ({}) [{}ms]",
                 best.name,
                 best.region,
                 duration.as_millis()
             );
         } else {
-            println!(
+            out_ln!(
                 "  \x1b[1;33m⚠\x1b[0m All mirror probes timed out; using primary mirror: \x1b[1m{}\x1b[0m ({})",
                 best.name,
                 best.region
@@ -337,7 +357,7 @@ pub async fn ensure_cached_image(cache_dir: &Path, distro: &DistroImage) -> Resu
             );
         }
 
-        match download_and_extract(url, &target_file, &distro.format, distro.display_name, mirror_name) {
+        match download_and_extract(url, &target_file, &distro.format, distro.display_name, mirror_name, to_stderr) {
             Ok(()) => {
                 return Ok(target_file);
             }
