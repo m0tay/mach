@@ -10,12 +10,17 @@ pub const DOCKER_VM_NAME: &str = "mach-docker";
 
 /// Ensure the dedicated Docker infrastructure machine exists.
 pub async fn ensure_docker_vm(cfg: &MachConfig) -> Result<Machine> {
-    if let Some(m) = super::find_machine(&cfg.machines_dir, DOCKER_VM_NAME)? {
+    let target_mem = cfg.system_memory_mib();
+    if let Some(mut m) = super::find_machine(&cfg.machines_dir, DOCKER_VM_NAME)? {
+        if m.config.memory_mb != target_mem {
+            m.config.memory_mb = target_mem;
+            let _ = m.save(&cfg.machines_dir);
+        }
         return Ok(m);
     }
 
-    println!("  \x1b[1;36m➜\x1b[0m Provisioning dedicated Docker infrastructure machine (\x1b[1m{}\x1b[0m)...", DOCKER_VM_NAME);
-    crate::commands::create::run_with_isolated("debian", Some(DOCKER_VM_NAME), 2, 2048, 20, "aarch64", false).await?;
+    println!("  \x1b[1;36m➜\x1b[0m Provisioning unified container infrastructure machine (\x1b[1m{}\x1b[0m, {} MiB RAM)...", DOCKER_VM_NAME, target_mem);
+    crate::commands::create::run_with_isolated("debian", Some(DOCKER_VM_NAME), 2, target_mem, 20, "aarch64", false).await?;
 
     let m = super::find_machine(&cfg.machines_dir, DOCKER_VM_NAME)?
         .ok_or_else(|| anyhow::anyhow!("failed to create Docker infrastructure machine"))?;

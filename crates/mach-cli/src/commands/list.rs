@@ -110,7 +110,11 @@ pub async fn run(all: bool, show_system: bool) -> Result<()> {
                 };
 
                 let details = if m.config.name == "mach-docker" {
-                    "Docker Engine (docker.sock)"
+                    if cfg.k8s.was_running {
+                        "Docker Engine & K8s Cluster"
+                    } else {
+                        "Docker Engine (docker.sock)"
+                    }
                 } else if m.config.name.contains("k8s") || m.config.name.contains("kubernetes") {
                     "Kubernetes API (:26443)"
                 } else {

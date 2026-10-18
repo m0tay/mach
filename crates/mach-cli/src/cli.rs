@@ -474,9 +474,15 @@ pub enum ConfigAction {
     /// Show current configuration
     Show,
 
+    /// Get a configuration key value
+    Get {
+        /// Configuration key (e.g. system_memory_mb, default_memory_mb, default_cpus)
+        key: String,
+    },
+
     /// Set a configuration key-value pair
     Set {
-        /// Configuration key (e.g. default_cpus, default_memory_mb, log_level)
+        /// Configuration key (e.g. default_cpus, default_memory_mb, system_memory_mb, log_level)
         key: String,
         /// New value
         value: String,

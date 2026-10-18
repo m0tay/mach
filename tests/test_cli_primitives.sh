@@ -75,6 +75,13 @@ CFG_K8S=$(machctl config show)
 assert_contains "$CFG_K8S" '"was_running": true' "machctl config set k8s.was_running updates state"
 machctl config set k8s.was_running false
 
+machctl config set system_memory_mb 6144
+CFG_MEM=$(machctl config get system_memory_mb)
+assert_contains "$CFG_MEM" "6144" "machctl config get system_memory_mb returns updated value"
+machctl config set system_memory_mb 4096
+CFG_MEM_DEF=$(machctl config get system_memory_mb)
+assert_contains "$CFG_MEM_DEF" "4096" "machctl config set reverts system_memory_mb to 4096"
+
 # 4. Status checks on empty environment
 echo -e "\n${YELLOW}[4/15] Testing docker and k8s status commands...${NC}"
 DOCKER_ST=$(mach docker status)

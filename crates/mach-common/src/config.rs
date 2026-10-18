@@ -166,6 +166,10 @@ fn default_rosetta_val() -> bool {
     true
 }
 
+fn default_system_memory_val() -> u64 {
+    4096
+}
+
 // ---------------------------------------------------------------------------
 // MachConfig
 // ---------------------------------------------------------------------------
@@ -200,6 +204,13 @@ pub struct MachConfig {
     /// with existing callers and older config formats.
     #[serde(default = "default_memory_val", skip_serializing)]
     pub default_memory_mb: u64,
+
+    /// Memory in mebibytes (MiB) assigned to the unified system infrastructure machine
+    /// hosting Docker Engine and Kubernetes (mach-docker).
+    ///
+    /// Default: `4096` (4 GiB)
+    #[serde(default = "default_system_memory_val", alias = "system_memory_mb", alias = "docker_memory_mb", alias = "k8s_memory_mb")]
+    pub system_memory_mib: u64,
 
     /// Default disk size in gibibytes assigned to a new machine.
     ///
@@ -270,6 +281,7 @@ impl Default for MachConfig {
             default_cpus: 2,
             default_memory_mib: 2048,
             default_memory_mb: 2048,
+            system_memory_mib: 4096,
             default_disk_gib: 20,
             rosetta: true,
             network: NetworkConfig::default(),
@@ -312,12 +324,29 @@ impl MachConfig {
         } else if self.default_memory_mib != self.default_memory_mb {
             self.default_memory_mb = self.default_memory_mib;
         }
+        if self.system_memory_mib < 1024 {
+            self.system_memory_mib = 4096;
+        }
+    }
+
+    /// Returns the configured system memory in MiB, with a minimum of 1024 MiB and defaulting to 4096 MiB.
+    pub fn system_memory_mib(&self) -> u64 {
+        if self.system_memory_mib < 1024 {
+            4096
+        } else {
+            self.system_memory_mib
+        }
     }
 
     /// Sets both `default_memory_mib` and legacy `default_memory_mb`.
     pub fn set_memory_mib(&mut self, mib: u64) {
         self.default_memory_mib = mib;
         self.default_memory_mb = mib;
+    }
+
+    /// Sets `system_memory_mib`.
+    pub fn set_system_memory_mib(&mut self, mib: u64) {
+        self.system_memory_mib = mib;
     }
 
     /// Load configuration from `~/.mach/config.yaml` if it exists, falling back
@@ -478,6 +507,7 @@ mod tests {
         assert_eq!(cfg.default_cpus, 2);
         assert_eq!(cfg.default_memory_mib, 2048);
         assert_eq!(cfg.default_memory_mb, 2048);
+        assert_eq!(cfg.system_memory_mib, 4096);
         assert_eq!(cfg.default_disk_gib, 20);
         assert!(cfg.rosetta);
         assert_eq!(cfg.network.nat, true);
@@ -653,6 +683,23 @@ k8s:
         let loaded = MachConfig::load_from_dir(&dir).unwrap();
         assert!(loaded.docker.was_running);
         assert!(loaded.k8s.was_running);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_system_memory_config_and_aliases() {
+        let dir = std::env::temp_dir().join(format!("mach-test-sysmem-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let yaml = r#"
+system_memory_mib: 6144
+"#;
+        std::fs::write(dir.join("config.yaml"), yaml).unwrap();
+
+        let loaded = MachConfig::load_from_dir(&dir).unwrap();
+        assert_eq!(loaded.system_memory_mib, 6144);
+        assert_eq!(loaded.system_memory_mib(), 6144);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

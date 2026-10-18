@@ -13,14 +13,8 @@ use crate::commands::find_machine;
 pub const K8S_VM_NAME: &str = "mach-kubernetes";
 pub const ALT_K8S_VM_NAME: &str = "mach-k8s";
 
-pub fn resolve_k8s_machine_name(machines_dir: &std::path::Path) -> Result<String> {
-    if find_machine(machines_dir, K8S_VM_NAME)?.is_some() {
-        return Ok(K8S_VM_NAME.to_string());
-    }
-    if find_machine(machines_dir, ALT_K8S_VM_NAME)?.is_some() {
-        return Ok(ALT_K8S_VM_NAME.to_string());
-    }
-    Ok(K8S_VM_NAME.to_string())
+pub fn resolve_k8s_machine_name(_machines_dir: &std::path::Path) -> Result<String> {
+    Ok(crate::commands::docker::DOCKER_VM_NAME.to_string())
 }
 
 /// Terminate any existing background SSH port-forward tunnel for Kubernetes API (26443).
@@ -98,26 +92,34 @@ pub async fn enable() -> Result<()> {
 
     println!("\x1b[1;36m➜\x1b[0m Checking mach Kubernetes cluster...");
 
-    let vm_name = resolve_k8s_machine_name(&cfg.machines_dir)?;
-    let machine = find_machine(&cfg.machines_dir, &vm_name)?;
-
-    if machine.is_none() {
-        println!("  Creating dedicated Kubernetes node \x1b[1m{}\x1b[0m...", vm_name);
-        crate::commands::create::run(
-            "debian",
-            Some(&vm_name),
-            2,
-            3072,
-            20,
-            "aarch64",
-        )
-        .await?;
+    // 1. Check for legacy standalone mach-kubernetes VM and cleanly migrate
+    if let Some(mut legacy_m) = find_machine(&cfg.machines_dir, K8S_VM_NAME)? {
+        if legacy_m.state == MachineState::Running {
+            println!("  \x1b[1;33m➜\x1b[0m Consolidating Kubernetes into unified infrastructure VM... Stopping legacy standalone {K8S_VM_NAME}.");
+            let _ = crate::commands::stop::stop_single_machine(&mut legacy_m, &cfg, true);
+        }
+        let legacy_dir = cfg.machines_dir.join(K8S_VM_NAME);
+        if legacy_dir.exists() {
+            println!("  \x1b[1;32m✓\x1b[0m Reclaimed legacy standalone VM storage ({})...", legacy_dir.display());
+            let _ = std::fs::remove_dir_all(legacy_dir);
+        }
+    }
+    if let Some(mut legacy_m2) = find_machine(&cfg.machines_dir, ALT_K8S_VM_NAME)? {
+        if legacy_m2.state == MachineState::Running {
+            let _ = crate::commands::stop::stop_single_machine(&mut legacy_m2, &cfg, true);
+        }
+        let legacy_dir2 = cfg.machines_dir.join(ALT_K8S_VM_NAME);
+        if legacy_dir2.exists() {
+            let _ = std::fs::remove_dir_all(legacy_dir2);
+        }
     }
 
-    let m = find_machine(&cfg.machines_dir, &vm_name)?.unwrap();
-    let mut is_alive = m.state == MachineState::Running && m.pid.map(|p| nix::sys::signal::kill(nix::unistd::Pid::from_raw(p as i32), None).is_ok()).unwrap_or(false);
+    // 2. Ensure unified mach-docker VM exists and is running
+    let vm_name = crate::commands::docker::DOCKER_VM_NAME;
+    let docker_m = crate::commands::docker::ensure_docker_vm(&cfg).await?;
+    let mut is_alive = docker_m.state == MachineState::Running && docker_m.pid.map(|p| nix::sys::signal::kill(nix::unistd::Pid::from_raw(p as i32), None).is_ok()).unwrap_or(false);
     if is_alive {
-        if let Some(ip) = m.ip_address {
+        if let Some(ip) = docker_m.ip_address {
             if !tokio::time::timeout(std::time::Duration::from_millis(1500), tokio::net::TcpStream::connect((ip, 22))).await.map(|r| r.is_ok()).unwrap_or(false) {
                 is_alive = false;
             }
@@ -126,28 +128,46 @@ pub async fn enable() -> Result<()> {
         }
     }
     if !is_alive {
-        crate::commands::start::run(Some(&vm_name)).await?;
+        println!("  \x1b[1;36m➜\x1b[0m Starting unified infrastructure machine ({vm_name})...");
+        crate::commands::start::run(Some(vm_name)).await?;
     }
 
-    let m = find_machine(&cfg.machines_dir, &vm_name)?.unwrap();
-    let ip = m.ip_address.context("Kubernetes VM has no IP address")?;
+    let m = find_machine(&cfg.machines_dir, vm_name)?
+        .ok_or_else(|| anyhow::anyhow!("infrastructure machine {vm_name} not found"))?;
+    let ip = m.ip_address.context("Unified infrastructure VM has no IP address")?;
 
     // Wait for SSH to be completely ready with exponential backoff
     wait_for_ssh_ready(&ip).await?;
 
-    println!("  \x1b[1;36m➜\x1b[0m Installing and configuring K3s inside {}...", vm_name);
+    println!("  \x1b[1;36m➜\x1b[0m Configuring Docker runtime and K3s inside {}...", vm_name);
 
-    // Install k3s if not present
+    // 3. Configure Docker and K3s with --docker integration
+    let k3s_setup_script = r#"which dockerd >/dev/null || (apt-get update -y >/dev/null 2>&1 && apt-get install -y docker.io containerd >/dev/null 2>&1);
+systemctl enable --now docker >/dev/null 2>&1;
+mkdir -p /etc/rancher/k3s;
+cat << 'EOF' > /etc/rancher/k3s/config.yaml
+docker: true
+disable:
+  - traefik
+tls-san:
+  - 127.0.0.1
+  - k8s.mach.local
+EOF
+which k3s >/dev/null 2>&1 || curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --docker --disable traefik" sh -s -;
+systemctl enable --now k3s >/dev/null 2>&1;
+"#;
+
     let mut check_k3s_cmd = Command::new("ssh");
     check_k3s_cmd.args(crate::ssh::mach_ssh_args());
     check_k3s_cmd.args([
+        "-o", "ConnectTimeout=120",
         &format!("root@{ip}"),
-        "which k3s >/dev/null 2>&1 || curl -sfL https://get.k3s.io | sh -s - --disable traefik",
+        k3s_setup_script,
     ]);
     let check_k3s = check_k3s_cmd.status()?;
 
     if !check_k3s.success() {
-        bail!("Failed to initialize K3s inside Kubernetes VM");
+        bail!("Failed to initialize K3s inside unified infrastructure VM");
     }
 
     // Retrieve kubeconfig
@@ -351,14 +371,30 @@ pub async fn stop() -> Result<()> {
     println!("  \x1b[1;36m➜\x1b[0m Terminating Kubernetes SSH tunnel...");
     terminate_k8s_ssh_tunnel();
 
-    let vm_name = resolve_k8s_machine_name(&cfg.machines_dir)?;
-    if find_machine(&cfg.machines_dir, &vm_name)?.is_some() {
-        println!("  \x1b[1;36m➜\x1b[0m Stopping Kubernetes node {}...", vm_name);
-        crate::commands::stop::run(Some(&vm_name), false, true).await?;
-        println!("\x1b[1;32m✓\x1b[0m Kubernetes cluster stopped.");
-    } else {
-        println!("Kubernetes cluster is not currently installed.");
+    let vm_name = crate::commands::docker::DOCKER_VM_NAME;
+    if let Some(m) = find_machine(&cfg.machines_dir, vm_name)? {
+        if m.state == MachineState::Running {
+            if let Some(ip) = m.ip_address {
+                println!("  \x1b[1;36m➜\x1b[0m Stopping Kubernetes (K3s) service inside {vm_name}...");
+                let mut cmd = Command::new("ssh");
+                cmd.args(crate::ssh::mach_ssh_args());
+                cmd.args([
+                    "-o", "ConnectTimeout=3",
+                    &format!("root@{ip}"),
+                    "systemctl stop k3s 2>/dev/null || true",
+                ]);
+                let _ = cmd.status();
+            }
+        }
     }
+    // Also stop legacy standalone machine if still present
+    if let Some(legacy_m) = find_machine(&cfg.machines_dir, K8S_VM_NAME)? {
+        if legacy_m.state == MachineState::Running {
+            let _ = crate::commands::stop::run(Some(K8S_VM_NAME), false, true).await;
+        }
+    }
+
+    println!("\x1b[1;32m✓\x1b[0m Kubernetes cluster stopped.");
     Ok(())
 }
 
@@ -371,24 +407,23 @@ pub async fn restart() -> Result<()> {
 /// Open an interactive shell inside the Kubernetes infrastructure machine.
 pub async fn shell() -> Result<()> {
     let cfg = MachConfig::load()?;
-    let vm_name = resolve_k8s_machine_name(&cfg.machines_dir)?;
-    if find_machine(&cfg.machines_dir, &vm_name)?.is_none() {
+    let vm_name = crate::commands::docker::DOCKER_VM_NAME;
+    if find_machine(&cfg.machines_dir, vm_name)?.is_none() {
         enable().await?;
     }
-    println!("\x1b[1;36m➜\x1b[0m Connecting to Kubernetes infrastructure machine (\x1b[1m{}\x1b[0m)...", vm_name);
-    crate::commands::shell::run(Some(&vm_name), true, &[]).await
+    println!("\x1b[1;36m➜\x1b[0m Connecting to unified infrastructure machine (\x1b[1m{}\x1b[0m)...", vm_name);
+    crate::commands::shell::run(Some(vm_name), true, &[]).await
 }
 
 /// Show status of the Kubernetes cluster.
 pub async fn status() -> Result<()> {
     let cfg = MachConfig::load()?;
-    let vm_name = resolve_k8s_machine_name(&cfg.machines_dir)?;
-    let machine = find_machine(&cfg.machines_dir, &vm_name)?;
+    let vm_name = crate::commands::docker::DOCKER_VM_NAME;
+    let machine = find_machine(&cfg.machines_dir, vm_name)?;
 
     match machine {
         Some(m) if m.state == MachineState::Running => {
             let ip = m.ip_address.unwrap_or_else(|| std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
-            println!("\x1b[1;32m●\x1b[0m Kubernetes is \x1b[1;32mrunning\x1b[0m on {} (IP: {})", vm_name, ip);
 
             // Test connecting to https://127.0.0.1:26443
             let tunnel_connected = tokio::time::timeout(
@@ -400,6 +435,7 @@ pub async fn status() -> Result<()> {
             .unwrap_or(false);
 
             if tunnel_connected {
+                println!("\x1b[1;32m●\x1b[0m Kubernetes is \x1b[1;32mrunning\x1b[0m on {} (IP: {})", vm_name, ip);
                 println!("  API Server:  \x1b[1;32m●\x1b[0m \x1b[1;34mhttps://127.0.0.1:26443\x1b[0m (reachable)");
                 let home = dirs::home_dir().unwrap_or_default();
                 let conf = home.join(".kube").join("config.mach");
@@ -410,13 +446,28 @@ pub async fn status() -> Result<()> {
                         .status();
                 }
             } else {
-                println!("  API Server:  \x1b[1;31m○\x1b[0m \x1b[1;33mhttps://127.0.0.1:26443\x1b[0m (not responding)");
-                println!("               Run \x1b[1;34mmachctl k8s start\x1b[0m to restore the tunnel.");
+                let mut check_k3s_cmd = Command::new("ssh");
+                check_k3s_cmd.args(crate::ssh::mach_ssh_args());
+                check_k3s_cmd.args([
+                    "-o", "ConnectTimeout=2",
+                    &format!("root@{ip}"),
+                    "systemctl is-active k3s 2>/dev/null",
+                ]);
+                let is_k3s_active = check_k3s_cmd.output().map(|o| String::from_utf8_lossy(&o.stdout).trim() == "active").unwrap_or(false);
+
+                if is_k3s_active {
+                    println!("\x1b[1;33m◐\x1b[0m Kubernetes service is active on {}, but API tunnel is disconnected", vm_name);
+                    println!("  API Server:  \x1b[1;33m○\x1b[0m \x1b[1;33mhttps://127.0.0.1:26443\x1b[0m (not responding)");
+                    println!("               Run \x1b[1;34mmachctl k8s start\x1b[0m to restore the tunnel.");
+                } else {
+                    println!("\x1b[1;33m○\x1b[0m Kubernetes cluster is \x1b[1;33mstopped\x1b[0m (run 'machctl k8s start' to start)");
+                    println!("  API Server:  \x1b[1;33m○ stopped\x1b[0m");
+                }
             }
         }
         Some(m) => {
             terminate_k8s_ssh_tunnel();
-            println!("\x1b[1;33m○\x1b[0m Kubernetes node {} is \x1b[1;33mstopped\x1b[0m ({})", vm_name, m.state);
+            println!("\x1b[1;33m○\x1b[0m Kubernetes is \x1b[1;33mstopped\x1b[0m (infrastructure VM {} is {})", vm_name, m.state);
             println!("  API Server:  \x1b[1;33m○ stopped (run 'machctl k8s start')\x1b[0m");
         }
         None => {

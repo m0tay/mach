@@ -328,23 +328,28 @@ mod imp {
         }
     }
 
-    fn get_k8s_status(all_machines: &[mach_common::machine::Machine]) -> &'static str {
-        let k8s_vm = all_machines.iter().find(|m| {
-            m.config.name == "mach-kubernetes"
+    fn get_k8s_status(all_machines: &[mach_common::machine::Machine], cfg: Option<&MachConfig>) -> &'static str {
+        if is_k8s_api_responding() {
+            return "Kubernetes: Ready";
+        }
+        let infra_vm = all_machines.iter().find(|m| {
+            m.config.name == "mach-docker"
+                || m.config.name == "mach-kubernetes"
                 || m.config.name == "mach-k8s"
         });
-        match k8s_vm {
+        match infra_vm {
             None => "Kubernetes: Not installed",
             Some(m) => match &m.state {
                 MachineState::Error(_) => "Kubernetes: Error",
                 MachineState::Stopped | MachineState::Stopping => "Kubernetes: Stopped",
                 MachineState::Creating | MachineState::Starting => "Kubernetes: Starting...",
                 MachineState::Running => {
-                    if is_k8s_api_responding() {
-                        "Kubernetes: Ready"
-                    } else {
-                        "Kubernetes: Starting..."
+                    if let Some(c) = cfg {
+                        if c.k8s.was_running {
+                            return "Kubernetes: Starting...";
+                        }
                     }
+                    "Kubernetes: Stopped"
                 }
             },
         }
@@ -403,7 +408,7 @@ mod imp {
         add_menu_item(menu, docker_text, None, None, false);
 
         // Kubernetes status
-        let k8s_text = get_k8s_status(&all_machines);
+        let k8s_text = get_k8s_status(&all_machines, cfg_res.as_ref().ok());
         add_menu_item(menu, k8s_text, None, None, false);
 
         // Separator

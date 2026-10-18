@@ -484,6 +484,9 @@ async fn main() -> Result<()> {
             ConfigAction::Show => {
                 commands::config::show().await?;
             }
+            ConfigAction::Get { key } => {
+                commands::config::get(&key).await?;
+            }
             ConfigAction::Set { key, value } => {
                 commands::config::set(&key, &value).await?;
             }

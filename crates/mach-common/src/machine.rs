@@ -205,7 +205,7 @@ impl Machine {
     /// Returns human-readable system service name if this is an infrastructure machine.
     pub fn system_service_name(&self) -> Option<&'static str> {
         if self.config.name == "mach-docker" {
-            Some("Docker")
+            Some("Docker & K8s")
         } else if self.config.name == "mach-k8s" || self.config.name == "mach-kubernetes" {
             Some("Kubernetes")
         } else if self.config.is_system {
