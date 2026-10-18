@@ -5,6 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::progress;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImageFormat {
     TarXz { member: &'static str },
@@ -57,81 +59,133 @@ fn download_and_extract(
     url: &str,
     target_file: &Path,
     format: &ImageFormat,
+    distro_name: &str,
+    mirror_label: &str,
 ) -> Result<()> {
+    let meta = progress::probe_remote_url(url);
+    let tag = if meta.provider_tag.is_empty() {
+        mirror_label.to_string()
+    } else {
+        format!("{} · {}", mirror_label, meta.provider_tag)
+    };
+
+    let mut pb = progress::ProgressBar::new(
+        distro_name.to_string(),
+        Some(tag),
+        meta.content_length,
+    );
+
     match format {
         ImageFormat::TarXz { member } => {
             let out_file = fs::File::create(target_file)
                 .with_context(|| format!("failed to create image file at {}", target_file.display()))?;
 
             let mut curl_proc = Command::new("curl")
-                .args(["-fSL", "--progress-bar", url])
+                .args(["-f", "-s", "-S", "-L", url])
                 .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
                 .spawn()
                 .with_context(|| "failed to spawn curl")?;
 
-            let curl_out = curl_proc.stdout.take().context("failed to pipe curl stdout")?;
-
-            let tar_status = Command::new("tar")
+            let mut tar_proc = Command::new("tar")
                 .args(["-xJf", "-", "-O", member])
-                .stdin(curl_out)
+                .stdin(std::process::Stdio::piped())
                 .stdout(out_file)
-                .status()
-                .with_context(|| "failed to execute tar -xJf")?;
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .with_context(|| "failed to spawn tar -xJf")?;
 
+            let mut curl_out = curl_proc.stdout.take().context("failed to pipe curl stdout")?;
+            let mut tar_in = tar_proc.stdin.take().context("failed to open tar stdin")?;
+
+            let copy_res = progress::copy_with_progress(&mut curl_out, &mut tar_in, &mut pb);
+            drop(tar_in);
+
+            let tar_status = tar_proc.wait().with_context(|| "failed to wait on tar")?;
             let curl_status = curl_proc.wait().with_context(|| "failed to wait on curl")?;
 
-            if !curl_status.success() || !tar_status.success() {
+            if copy_res.is_err() || !curl_status.success() || !tar_status.success() {
                 let _ = fs::remove_file(target_file);
+                let mut err_msg = String::new();
+                if let Some(mut err_pipe) = curl_proc.stderr.take() {
+                    let _ = std::io::Read::read_to_string(&mut err_pipe, &mut err_msg);
+                }
                 bail!(
-                    "failed to download/extract image from {} (curl: {:?}, tar: {:?})",
+                    "failed to download/extract image from {} (curl: {:?}, tar: {:?}, err: {})",
                     url,
                     curl_status.code(),
-                    tar_status.code()
+                    tar_status.code(),
+                    err_msg.trim()
                 );
             }
+
+            let downloaded = copy_res.unwrap_or(0);
+            pb.finish_with_message(&format!(
+                "{} cloud image ready ({})",
+                distro_name,
+                progress::format_bytes(downloaded)
+            ));
         }
         ImageFormat::TarGz { member } => {
             let out_file = fs::File::create(target_file)
                 .with_context(|| format!("failed to create image file at {}", target_file.display()))?;
 
             let mut curl_proc = Command::new("curl")
-                .args(["-fSL", "--progress-bar", url])
+                .args(["-f", "-s", "-S", "-L", url])
                 .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
                 .spawn()
                 .with_context(|| "failed to spawn curl")?;
 
-            let curl_out = curl_proc.stdout.take().context("failed to pipe curl stdout")?;
-
-            let tar_status = Command::new("tar")
+            let mut tar_proc = Command::new("tar")
                 .args(["-xzf", "-", "-O", member])
-                .stdin(curl_out)
+                .stdin(std::process::Stdio::piped())
                 .stdout(out_file)
-                .status()
-                .with_context(|| "failed to execute tar -xzf")?;
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .with_context(|| "failed to spawn tar -xzf")?;
 
+            let mut curl_out = curl_proc.stdout.take().context("failed to pipe curl stdout")?;
+            let mut tar_in = tar_proc.stdin.take().context("failed to open tar stdin")?;
+
+            let copy_res = progress::copy_with_progress(&mut curl_out, &mut tar_in, &mut pb);
+            drop(tar_in);
+
+            let tar_status = tar_proc.wait().with_context(|| "failed to wait on tar")?;
             let curl_status = curl_proc.wait().with_context(|| "failed to wait on curl")?;
 
-            if !curl_status.success() || !tar_status.success() {
+            if copy_res.is_err() || !curl_status.success() || !tar_status.success() {
                 let _ = fs::remove_file(target_file);
+                let mut err_msg = String::new();
+                if let Some(mut err_pipe) = curl_proc.stderr.take() {
+                    let _ = std::io::Read::read_to_string(&mut err_pipe, &mut err_msg);
+                }
                 bail!(
-                    "failed to download/extract image from {} (curl: {:?}, tar: {:?})",
+                    "failed to download/extract image from {} (curl: {:?}, tar: {:?}, err: {})",
                     url,
                     curl_status.code(),
-                    tar_status.code()
+                    tar_status.code(),
+                    err_msg.trim()
                 );
             }
+
+            let downloaded = copy_res.unwrap_or(0);
+            pb.finish_with_message(&format!(
+                "{} cloud image ready ({})",
+                distro_name,
+                progress::format_bytes(downloaded)
+            ));
         }
         ImageFormat::RawXz => {
             let out_file = fs::File::create(target_file)
                 .with_context(|| format!("failed to create image file at {}", target_file.display()))?;
 
             let mut curl_proc = Command::new("curl")
-                .args(["-fSL", "--progress-bar", url])
+                .args(["-f", "-s", "-S", "-L", url])
                 .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
                 .spawn()
                 .with_context(|| "failed to spawn curl")?;
-
-            let curl_out = curl_proc.stdout.take().context("failed to pipe curl stdout")?;
 
             let has_xz = Command::new("which")
                 .arg("xz")
@@ -139,53 +193,97 @@ fn download_and_extract(
                 .map(|o| o.status.success())
                 .unwrap_or(false);
 
-            let decomp_status = if has_xz {
-                Command::new("xz")
+            let (mut decomp_proc, mut decomp_in) = if has_xz {
+                let mut p = Command::new("xz")
                     .arg("-dc")
-                    .stdin(curl_out)
+                    .stdin(std::process::Stdio::piped())
                     .stdout(out_file)
-                    .status()
-                    .with_context(|| "failed to execute xz -dc")?
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .with_context(|| "failed to spawn xz -dc")?;
+                let in_pipe = p.stdin.take().context("failed to open xz stdin")?;
+                (p, in_pipe)
             } else {
-                Command::new("/usr/bin/python3")
+                let mut p = Command::new("/usr/bin/python3")
                     .args([
                         "-c",
                         "import sys, lzma, shutil; shutil.copyfileobj(lzma.LZMAFile(sys.stdin.buffer), sys.stdout.buffer)",
                     ])
-                    .stdin(curl_out)
+                    .stdin(std::process::Stdio::piped())
                     .stdout(out_file)
-                    .status()
-                    .with_context(|| "failed to execute python3 lzma decompression")?
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .with_context(|| "failed to spawn python3 lzma decompression")?;
+                let in_pipe = p.stdin.take().context("failed to open python3 stdin")?;
+                (p, in_pipe)
             };
+
+            let mut curl_out = curl_proc.stdout.take().context("failed to pipe curl stdout")?;
+            let copy_res = progress::copy_with_progress(&mut curl_out, &mut decomp_in, &mut pb);
+            drop(decomp_in);
+
+            let decomp_status = decomp_proc.wait().with_context(|| "failed to wait on decomp")?;
+            let curl_status = curl_proc.wait().with_context(|| "failed to wait on curl")?;
+
+            if copy_res.is_err() || !curl_status.success() || !decomp_status.success() {
+                let _ = fs::remove_file(target_file);
+                let mut err_msg = String::new();
+                if let Some(mut err_pipe) = curl_proc.stderr.take() {
+                    let _ = std::io::Read::read_to_string(&mut err_pipe, &mut err_msg);
+                }
+                bail!(
+                    "failed to download/decompress image from {} (curl: {:?}, decomp: {:?}, err: {})",
+                    url,
+                    curl_status.code(),
+                    decomp_status.code(),
+                    err_msg.trim()
+                );
+            }
+
+            let downloaded = copy_res.unwrap_or(0);
+            pb.finish_with_message(&format!(
+                "{} cloud image ready ({})",
+                distro_name,
+                progress::format_bytes(downloaded)
+            ));
+        }
+        ImageFormat::Raw => {
+            let mut out_file = fs::File::create(target_file)
+                .with_context(|| format!("failed to create image file at {}", target_file.display()))?;
+
+            let mut curl_proc = Command::new("curl")
+                .args(["-f", "-s", "-S", "-L", url])
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .with_context(|| "failed to spawn curl")?;
+
+            let mut curl_out = curl_proc.stdout.take().context("failed to pipe curl stdout")?;
+            let copy_res = progress::copy_with_progress(&mut curl_out, &mut out_file, &mut pb);
+            drop(out_file);
 
             let curl_status = curl_proc.wait().with_context(|| "failed to wait on curl")?;
 
-            if !curl_status.success() || !decomp_status.success() {
+            if copy_res.is_err() || !curl_status.success() {
                 let _ = fs::remove_file(target_file);
+                let mut err_msg = String::new();
+                if let Some(mut err_pipe) = curl_proc.stderr.take() {
+                    let _ = std::io::Read::read_to_string(&mut err_pipe, &mut err_msg);
+                }
                 bail!(
-                    "failed to download/decompress image from {} (curl: {:?}, decomp: {:?})",
+                    "failed to download image from {} (curl: {:?}, err: {})",
                     url,
                     curl_status.code(),
-                    decomp_status.code()
+                    err_msg.trim()
                 );
             }
-        }
-        ImageFormat::Raw => {
-            let status = Command::new("curl")
-                .args([
-                    "-fSL",
-                    "--progress-bar",
-                    "-o",
-                    target_file.to_str().unwrap(),
-                    url,
-                ])
-                .status()
-                .with_context(|| "failed to download disk image")?;
 
-            if !status.success() {
-                let _ = fs::remove_file(target_file);
-                bail!("failed to download image from {} (status: {:?})", url, status.code());
-            }
+            let downloaded = copy_res.unwrap_or(0);
+            pb.finish_with_message(&format!(
+                "{} cloud image ready ({})",
+                distro_name,
+                progress::format_bytes(downloaded)
+            ));
         }
     }
 
@@ -217,7 +315,7 @@ pub async fn ensure_cached_image(cache_dir: &Path, distro: &DistroImage) -> Resu
             );
         } else {
             println!(
-                "  \x1b[1;33m⚠\x1b[0m All mirror probes timed out; falling back to primary mirror: \x1b[1m{}\x1b[0m ({})",
+                "  \x1b[1;33m⚠\x1b[0m All mirror probes timed out; using primary mirror: \x1b[1m{}\x1b[0m ({})",
                 best.name,
                 best.region
             );
@@ -238,11 +336,9 @@ pub async fn ensure_cached_image(cache_dir: &Path, distro: &DistroImage) -> Resu
                 mirror_name
             );
         }
-        println!("  \x1b[1;36m➜\x1b[0m Downloading \x1b[1m{}\x1b[0m cloud image from {}...", distro.display_name, mirror_name);
 
-        match download_and_extract(url, &target_file, &distro.format) {
+        match download_and_extract(url, &target_file, &distro.format, distro.display_name, mirror_name) {
             Ok(()) => {
-                println!("  \x1b[1;32m✓\x1b[0m Cached \x1b[1m{}\x1b[0m to {}", distro.display_name, target_file.display());
                 return Ok(target_file);
             }
             Err(e) => {

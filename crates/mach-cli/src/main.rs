@@ -15,6 +15,7 @@ pub mod mdns;
 pub mod mirrors;
 pub mod nfs;
 pub mod port_forward;
+pub mod progress;
 pub mod proxy;
 pub mod ssh;
 pub mod tls;

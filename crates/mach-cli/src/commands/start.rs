@@ -255,6 +255,10 @@ pub async fn run_ext(name: Option<&str>, to_stderr: bool) -> Result<()> {
                     out_ln!("Machine \x1b[1m{}\x1b[0m is already running (PID: {}).", machine.config.name, pid);
                     out_ln!("  IP Address:  \x1b[1;34m{}\x1b[0m", ip);
                     out_ln!("  SSH Command: \x1b[1;32mssh root@{}\x1b[0m", ip);
+                    out_ln!("\nNext steps:");
+                    out_ln!("  ➜ To open shell:      \x1b[1;32mmach\x1b[0m (or \x1b[1;32mmach shell {}\x1b[0m)", machine.config.name);
+                    out_ln!("  ➜ To run commands:    \x1b[1;32mmach uname -a\x1b[0m");
+                    out_ln!("  ➜ To view dashboard:  \x1b[1;34mmachctl top\x1b[0m");
                     return Ok(());
                 }
             }
@@ -561,8 +565,11 @@ pub async fn run_ext(name: Option<&str>, to_stderr: bool) -> Result<()> {
     }
 
     if !to_stderr {
-        println!("\nRun \x1b[1;34mmach shell {}\x1b[0m to enter the machine.", machine.config.name);
-        println!("Run \x1b[1;32mdocker ps\x1b[0m (or \x1b[1;32mmachctl docker setup\x1b[0m) to control containers.");
+        println!("\nNext steps:");
+        println!("  ➜ To open shell:      \x1b[1;32mmach\x1b[0m (or \x1b[1;32mmach shell {}\x1b[0m)", machine.config.name);
+        println!("  ➜ To run commands:    \x1b[1;32mmach uname -a\x1b[0m");
+        println!("  ➜ To view dashboard:  \x1b[1;34mmachctl top\x1b[0m");
+        println!("  ➜ To manage Docker:   \x1b[1;32mdocker ps\x1b[0m (or \x1b[1;32mmachctl docker setup\x1b[0m)");
     }
 
     Ok(())
