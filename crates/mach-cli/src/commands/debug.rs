@@ -188,9 +188,37 @@ pub struct DebugCandidate {
     pub cmd: Option<String>,
 }
 
+/// Lightweight, dedicated first-party diagnostic container Dockerfile (~40 MB total).
+pub const DEBUG_DOCKERFILE: &str = r#"FROM alpine:3.20
+RUN apk add --no-cache \
+    bash \
+    bash-completion \
+    curl \
+    wget \
+    bind-tools \
+    iproute2 \
+    net-tools \
+    tcpdump \
+    netcat-openbsd \
+    lsof \
+    strace \
+    htop \
+    procps \
+    jq \
+    tree \
+    nano \
+    ca-certificates
+ENV PS1="\[\033[1;36m\][mach-debug]\[\033[0m\] \[\033[1;32m\]\w\[\033[0m\] # "
+WORKDIR /root
+CMD ["/bin/bash"]
+"#;
+
 /// Priority-ordered candidate images for the debug container.
-/// Lightweight, instant-pull images (alpine, busybox) are prioritized over heavyweight multi-tool images (netshoot).
+/// 1. First-party custom `mach/debug:latest` with bash, curl, tcpdump, strace, htop, jq.
+/// 2. Fast lightweight fallbacks (`alpine`, `busybox`).
+/// 3. Heavyweight fallback (`nicolaka/netshoot`).
 pub const DEFAULT_CANDIDATES: &[(&str, Option<&str>)] = &[
+    ("mach/debug:latest", Some("bash")),
     ("alpine", Some("sh")),
     ("busybox", Some("sh")),
     ("nicolaka/netshoot", None),
@@ -205,6 +233,30 @@ pub fn is_image_present(image: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Ensure the first-party `mach/debug:latest` diagnostic image is built and available locally.
+pub fn ensure_debug_image() {
+    if is_image_present("mach/debug:latest") {
+        return;
+    }
+    eprintln!("\x1b[1;36m➜\x1b[0m Preparing first-party diagnostic image \x1b[1;35mmach/debug:latest\x1b[0m...");
+    let mut child = match Command::new("docker")
+        .args(["build", "-t", "mach/debug:latest", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        let _ = stdin.write_all(DEBUG_DOCKERFILE.as_bytes());
+    }
+    let _ = child.wait();
+}
+
 /// Resolve candidate debug images, prioritizing cached images.
 pub fn resolve_candidates(custom_image: Option<&str>) -> Vec<DebugCandidate> {
     if let Some(img) = custom_image {
@@ -213,6 +265,9 @@ pub fn resolve_candidates(custom_image: Option<&str>) -> Vec<DebugCandidate> {
             cmd: None,
         }];
     }
+
+    // Try building or ensuring the first-party debug image is ready
+    ensure_debug_image();
 
     let mut present = Vec::new();
     let mut missing = Vec::new();
@@ -475,9 +530,10 @@ mod tests {
 
     #[test]
     fn test_candidates_order() {
-        assert_eq!(DEFAULT_CANDIDATES[0].0, "alpine");
-        assert_eq!(DEFAULT_CANDIDATES[1].0, "busybox");
-        assert_eq!(DEFAULT_CANDIDATES[2].0, "nicolaka/netshoot");
+        assert_eq!(DEFAULT_CANDIDATES[0].0, "mach/debug:latest");
+        assert_eq!(DEFAULT_CANDIDATES[1].0, "alpine");
+        assert_eq!(DEFAULT_CANDIDATES[2].0, "busybox");
+        assert_eq!(DEFAULT_CANDIDATES[3].0, "nicolaka/netshoot");
     }
 
     #[test]
