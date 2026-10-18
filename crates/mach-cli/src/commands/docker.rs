@@ -627,6 +627,36 @@ pub async fn status() -> Result<()> {
     Ok(())
 }
 
+/// Stream or show Docker daemon systemd logs from the infrastructure VM.
+pub async fn logs(follow: bool, lines: usize) -> Result<()> {
+    let cfg = MachConfig::load()?;
+    let m = find_system_machine(&cfg.machines_dir)?
+        .ok_or_else(|| anyhow::anyhow!("Docker infrastructure machine not found"))?;
+
+    if m.state != MachineState::Running {
+        anyhow::bail!("Docker machine '{}' is not running (state: {:?})", m.config.name, m.state);
+    }
+
+    let ip = m.ip_address.ok_or_else(|| anyhow::anyhow!("Docker machine has no IP address"))?;
+
+    let mut args = crate::ssh::mach_ssh_args();
+    args.extend([
+        "-t".to_string(),
+        format!("root@{ip}"),
+        format!("journalctl -u docker -n {}{}", lines, if follow { " -f" } else { "" }),
+    ]);
+
+    let status = Command::new("ssh").args(&args).status()?;
+    if !status.success() {
+        if let Some(code) = status.code() {
+            if code != 130 { // 130 is Ctrl+C
+                tracing::debug!("ssh journalctl exited with status {code}");
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

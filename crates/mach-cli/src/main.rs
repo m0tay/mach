@@ -265,6 +265,10 @@ async fn main() -> Result<()> {
                                 return commands::docker::destroy(force).await;
                             }
                             Some("shell") => return commands::docker::shell().await,
+                            Some("logs") => {
+                                let follow = raw_args.iter().any(|a| a == "-f" || a == "--follow");
+                                return commands::docker::logs(follow, 50).await;
+                            }
                             _ => {
                                 // Non-admin command (e.g. `mach docker ps` with stopped VM)
                                 // falls through to transparent execution in Linux (run_cmd will auto-start)
@@ -277,6 +281,10 @@ async fn main() -> Result<()> {
                             Some("disable") | Some("stop") => return commands::k8s::disable().await,
                             Some("restart") => return commands::k8s::restart().await,
                             Some("shell") => return commands::k8s::shell().await,
+                            Some("logs") => {
+                                let follow = raw_args.iter().any(|a| a == "-f" || a == "--follow");
+                                return commands::k8s::logs(follow, 50).await;
+                            }
                             _ => {
                                 // Fall through
                             }
@@ -526,6 +534,9 @@ async fn main() -> Result<()> {
             DockerAction::Status => {
                 commands::docker::status().await?;
             }
+            DockerAction::Logs { follow, lines } => {
+                commands::docker::logs(follow, lines).await?;
+            }
         },
         Commands::Debug { container, image } => {
             commands::debug::run(&container, image.as_deref()).await?;
@@ -557,6 +568,9 @@ async fn main() -> Result<()> {
             }
             K8sAction::Status => {
                 commands::k8s::status().await?;
+            }
+            K8sAction::Logs { follow, lines } => {
+                commands::k8s::logs(follow, lines).await?;
             }
         },
         Commands::Link { binary, machine } => {

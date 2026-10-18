@@ -87,8 +87,89 @@ pub async fn run_foreground() -> Result<()> {
         }
     });
 
-    let _ = tokio::join!(dns_task, mdns_task, forwarder_task, proxy_task, bridge_task);
+    let cfg_watchdog = cfg.clone();
+    let watchdog_task = tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            run_service_watchdog(&cfg_watchdog).await;
+        }
+    });
+
+    let _ = tokio::join!(dns_task, mdns_task, forwarder_task, proxy_task, bridge_task, watchdog_task);
     Ok(())
+}
+
+async fn run_service_watchdog(cfg: &MachConfig) {
+    use mach_common::machine::MachineState;
+    let machines = match crate::commands::load_all_machines(&cfg.machines_dir) {
+        Ok(m) => m,
+        Err(_) => return,
+    };
+
+    let sys_vm = machines.iter().find(|m| {
+        m.config.name == "mach-system" || m.config.name == "mach-docker"
+    });
+
+    let (ip, is_running) = match sys_vm {
+        Some(m) if m.state == MachineState::Running => {
+            if let Some(ref ip) = m.ip_address {
+                (ip.clone(), true)
+            } else {
+                return;
+            }
+        }
+        _ => return,
+    };
+
+    if !is_running {
+        return;
+    }
+
+    let current_cfg = MachConfig::load().unwrap_or_else(|_| cfg.clone());
+
+    // 1. Docker socket self-healing watchdog
+    if current_cfg.docker.was_running {
+        let sock_responding = crate::menu::is_docker_socket_responding(Some(&current_cfg));
+        if !sock_responding {
+            eprintln!("[mach-daemon] [Watchdog] Docker socket dropped. Auto-healing tunnel to {ip}...");
+            crate::commands::docker::terminate_docker_ssh_tunnel();
+            let sock_path = current_cfg.data_dir.join("run").join("docker.sock");
+            let _ = std::fs::remove_file(&sock_path);
+
+            let mut tunnel_cmd = Command::new("ssh");
+            tunnel_cmd.args(crate::ssh::mach_ssh_args());
+            tunnel_cmd.args([
+                "-f", "-nNT",
+                "-o", "ServerAliveInterval=15",
+                "-o", "ServerAliveCountMax=3",
+                "-o", "ExitOnForwardFailure=yes",
+                "-L", &format!("{}:/var/run/docker.sock", sock_path.display()),
+                &format!("root@{ip}"),
+            ]);
+            let _ = tunnel_cmd.status();
+        }
+    }
+
+    // 2. Kubernetes API self-healing watchdog
+    if current_cfg.k8s.was_running {
+        let k8s_responding = crate::menu::is_k8s_api_responding();
+        if !k8s_responding {
+            eprintln!("[mach-daemon] [Watchdog] Kubernetes API tunnel dropped. Auto-healing tunnel to {ip}...");
+            crate::commands::k8s::terminate_k8s_ssh_tunnel();
+
+            let mut tunnel_cmd = Command::new("ssh");
+            tunnel_cmd.args(crate::ssh::mach_ssh_args());
+            tunnel_cmd.args([
+                "-f", "-nNT",
+                "-o", "ServerAliveInterval=15",
+                "-o", "ServerAliveCountMax=3",
+                "-o", "ExitOnForwardFailure=yes",
+                "-L", "127.0.0.1:26443:127.0.0.1:6443",
+                &format!("root@{ip}"),
+            ]);
+            let _ = tunnel_cmd.status();
+        }
+    }
 }
 
 pub fn is_daemon_running(run_dir: &Path) -> Option<u32> {

@@ -222,6 +222,48 @@ mod imp {
         pub k8s_pods: Vec<K8sPodMenuItem>,
     }
 
+    #[derive(Clone, Debug)]
+    pub struct ActiveOp {
+        pub description: String,
+        pub started_at: std::time::Instant,
+    }
+
+    static ACTIVE_OP: RwLock<Option<ActiveOp>> = RwLock::new(None);
+
+    fn set_active_op(desc: &str) {
+        if let Ok(mut lock) = ACTIVE_OP.write() {
+            *lock = Some(ActiveOp {
+                description: desc.to_string(),
+                started_at: std::time::Instant::now(),
+            });
+        }
+        unsafe {
+            update_status_item_state();
+        }
+    }
+
+    fn clear_active_op() {
+        if let Ok(mut lock) = ACTIVE_OP.write() {
+            *lock = None;
+        }
+        unsafe {
+            update_status_item_state();
+        }
+    }
+
+    fn send_macos_notification(title: &str, subtitle: &str, message: &str) {
+        let script = format!(
+            r#"display notification "{}" with title "{}" subtitle "{}""#,
+            message.replace('"', "\\\""),
+            title.replace('"', "\\\""),
+            subtitle.replace('"', "\\\""),
+        );
+        let _ = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .spawn();
+    }
+
     static CACHED_SNAPSHOT: RwLock<Option<MenuSnapshot>> = RwLock::new(None);
 
     fn is_system_machine(m: &mach_common::machine::Machine) -> bool {
@@ -232,7 +274,7 @@ mod imp {
             || m.config.name == "mach-k8s"
     }
 
-    fn is_docker_socket_responding(cfg: Option<&MachConfig>) -> bool {
+    pub(crate) fn is_docker_socket_responding(cfg: Option<&MachConfig>) -> bool {
         let mut candidates = Vec::new();
         if let Some(cfg) = cfg {
             candidates.push(cfg.data_dir.join("run").join("docker.sock"));
@@ -269,7 +311,7 @@ mod imp {
         false
     }
 
-    fn is_k8s_api_responding() -> bool {
+    pub(crate) fn is_k8s_api_responding() -> bool {
         let addr = std::net::SocketAddr::from(([127, 0, 0, 1], 26443));
         let timeout = std::time::Duration::from_millis(200);
         std::net::TcpStream::connect_timeout(&addr, timeout).is_ok()
@@ -678,7 +720,13 @@ mod imp {
                         (b"onRestartContainer:\0", on_restart_container as _),
                         (b"onStartContainer:\0", on_start_container as _),
                         (b"onStartDocker:\0", on_start_docker as _),
+                        (b"onStopDocker:\0", on_stop_docker as _),
+                        (b"onRestartDocker:\0", on_restart_docker as _),
+                        (b"onOpenDockerLogs:\0", on_open_docker_logs as _),
                         (b"onStartK8s:\0", on_start_k8s as _),
+                        (b"onStopK8s:\0", on_stop_k8s as _),
+                        (b"onRestartK8s:\0", on_restart_k8s as _),
+                        (b"onOpenK8sClusterLogs:\0", on_open_k8s_cluster_logs as _),
                         (b"onOpenK8sLogs:\0", on_open_k8s_logs as _),
                         (b"onOpenK8sShell:\0", on_open_k8s_shell as _),
                         (b"onOpenK8sPortForward:\0", on_open_k8s_port_forward as _),
@@ -784,6 +832,26 @@ mod imp {
     unsafe fn populate_menu(menu: *mut c_void, target: *mut c_void) {
         msg_send_void(menu, sel_registerName(b"removeAllItems\0".as_ptr() as _));
 
+        let active_op = {
+            let mut lock = ACTIVE_OP.write().unwrap();
+            if let Some(ref op) = *lock {
+                if op.started_at.elapsed() > std::time::Duration::from_secs(90) {
+                    *lock = None;
+                    None
+                } else {
+                    Some(op.clone())
+                }
+            } else {
+                None
+            }
+        };
+
+        if let Some(ref op) = active_op {
+            let banner = format!("  ⟳ Working: {}...", op.description);
+            add_menu_item(menu, &banner, None, None, false);
+            add_separator(menu);
+        }
+
         let snapshot = {
             let lock = CACHED_SNAPSHOT.read().unwrap();
             lock.clone().unwrap_or_default()
@@ -802,15 +870,26 @@ mod imp {
             add_menu_item(menu, "  None", None, None, false);
         } else {
             for vm in sorted_vms.iter().take(5) {
-                let bullet = match vm.state {
-                    MachineState::Running => "●",
-                    MachineState::Starting | MachineState::Creating | MachineState::Stopping => "◐",
-                    MachineState::Stopped => "○",
-                    MachineState::Error(_) => "⚠️",
+                let is_target_of_op = active_op
+                    .as_ref()
+                    .map(|o| o.description.contains(&vm.name))
+                    .unwrap_or(false);
+
+                let bullet = if is_target_of_op {
+                    "◐"
+                } else {
+                    match vm.state {
+                        MachineState::Running => "●",
+                        MachineState::Starting | MachineState::Creating | MachineState::Stopping => "◐",
+                        MachineState::Stopped => "○",
+                        MachineState::Error(_) => "⚠️",
+                    }
                 };
 
                 let name = truncate(&vm.name, 12);
-                let title = if vm.state == MachineState::Running {
+                let title = if is_target_of_op {
+                    format!("  {} {} (working...)", bullet, name)
+                } else if vm.state == MachineState::Running {
                     if let Some(ref ip) = vm.ip {
                         format!("  {} {} {}", bullet, name, ip)
                     } else {
@@ -886,7 +965,7 @@ mod imp {
                         "Start",
                         Some(start_sel),
                         Some(target),
-                        true,
+                        !is_target_of_op,
                         Some(&vm.name),
                     );
 
@@ -918,10 +997,21 @@ mod imp {
         // ═════════════════════════════════════════════════════════════════════════
         add_menu_item(menu, "CONTAINERS", None, None, false);
 
+        let is_starting_docker = active_op
+            .as_ref()
+            .map(|o| o.description.contains("Docker"))
+            .unwrap_or(false)
+            || snapshot.docker_status_text.contains("Starting");
+
         if !snapshot.docker_ready {
+            let docker_status_label = if is_starting_docker {
+                "Docker: Starting...".to_string()
+            } else {
+                snapshot.docker_status_text.clone()
+            };
             let parent_item = add_menu_item(
                 menu,
-                &format!("  {}", snapshot.docker_status_text),
+                &format!("  {}", docker_status_label),
                 None,
                 None,
                 true,
@@ -933,102 +1023,121 @@ mod imp {
                 "Start Docker",
                 Some(start_docker_sel),
                 Some(target),
+                !is_starting_docker,
+            );
+            let logs_sel = sel_registerName(b"onOpenDockerLogs:\0".as_ptr() as _);
+            add_menu_item(
+                sub,
+                "View Logs",
+                Some(logs_sel),
+                Some(target),
                 true,
             );
             attach_submenu(parent_item, sub);
-        } else if snapshot.containers.is_empty() {
-            add_menu_item(menu, "  None", None, None, false);
         } else {
-            let mut sorted = snapshot.containers.clone();
-            sorted.sort_by(|a, b| {
-                let a_running = a.state == "running";
-                let b_running = b.state == "running";
-                b_running
-                    .cmp(&a_running)
-                    .then_with(|| b.created.cmp(&a.created))
-            });
-            let total_containers = sorted.len();
+            let parent_item = add_menu_item(menu, "  ● Docker Engine", None, None, true);
+            let sub = create_submenu("Docker");
+            let logs_sel = sel_registerName(b"onOpenDockerLogs:\0".as_ptr() as _);
+            add_menu_item(sub, "View Logs", Some(logs_sel), Some(target), true);
+            let restart_sel = sel_registerName(b"onRestartDocker:\0".as_ptr() as _);
+            add_menu_item(sub, "Restart", Some(restart_sel), Some(target), !is_starting_docker);
+            let stop_sel = sel_registerName(b"onStopDocker:\0".as_ptr() as _);
+            add_menu_item(sub, "Stop", Some(stop_sel), Some(target), !is_starting_docker);
+            attach_submenu(parent_item, sub);
 
-            for c in sorted.iter().take(5) {
-                let is_up = c.state == "running";
-                let bullet = if is_up { "●" } else { "○" };
-                let name = truncate(&c.name, 14);
+            if snapshot.containers.is_empty() {
+                add_menu_item(menu, "  (no containers running)", None, None, false);
+            } else {
+                let mut sorted = snapshot.containers.clone();
+                sorted.sort_by(|a, b| {
+                    let a_running = a.state == "running";
+                    let b_running = b.state == "running";
+                    b_running
+                        .cmp(&a_running)
+                        .then_with(|| b.created.cmp(&a.created))
+                });
+                let total_containers = sorted.len();
 
-                let title = if is_up {
-                    if let Some(pub_p) = c.public_port {
-                        format!("  {} {} :{}", bullet, name, pub_p)
-                    } else if let Some(ref ip) = c.ip {
-                        format!("  {} {} {}", bullet, name, ip)
+                for c in sorted.iter().take(5) {
+                    let is_up = c.state == "running";
+                    let bullet = if is_up { "●" } else { "○" };
+                    let name = truncate(&c.name, 14);
+
+                    let title = if is_up {
+                        if let Some(pub_p) = c.public_port {
+                            format!("  {} {} :{}", bullet, name, pub_p)
+                        } else if let Some(ref ip) = c.ip {
+                            format!("  {} {} {}", bullet, name, ip)
+                        } else {
+                            format!("  {} {}", bullet, name)
+                        }
                     } else {
                         format!("  {} {}", bullet, name)
-                    }
-                } else {
-                    format!("  {} {}", bullet, name)
-                };
+                    };
 
-                let parent_item = add_menu_item(menu, &title, None, None, true);
-                let sub = create_submenu(&c.name);
+                    let parent_item = add_menu_item(menu, &title, None, None, true);
+                    let sub = create_submenu(&c.name);
 
-                if is_up {
-                    let open_url_sel = sel_registerName(b"onOpenUrl:\0".as_ptr() as _);
-                    let copy_sel = sel_registerName(b"onCopyText:\0".as_ptr() as _);
-                    let domain_url = format!("http://{}", c.domain);
+                    if is_up {
+                        let open_url_sel = sel_registerName(b"onOpenUrl:\0".as_ptr() as _);
+                        let copy_sel = sel_registerName(b"onCopyText:\0".as_ptr() as _);
+                        let domain_url = format!("http://{}", c.domain);
 
-                    if let Some(pub_p) = c.public_port {
-                        let port_url = format!("http://localhost:{}", pub_p);
+                        if let Some(pub_p) = c.public_port {
+                            let port_url = format!("http://localhost:{}", pub_p);
 
-                        add_menu_item_with_obj(
-                            sub,
-                            &format!("Open :{}", pub_p),
-                            Some(open_url_sel),
-                            Some(target),
-                            true,
-                            Some(&port_url),
-                        );
-                        add_menu_item_with_obj(
-                            sub,
-                            &format!("Open {}", c.domain),
-                            Some(open_url_sel),
-                            Some(target),
-                            true,
-                            Some(&domain_url),
-                        );
-                        add_menu_item_with_obj(
-                            sub,
-                            &format!("Copy URL (: {})", pub_p).replace(" ", ""),
-                            Some(copy_sel),
-                            Some(target),
-                            true,
-                            Some(&port_url),
-                        );
-                        add_menu_item_with_obj(
-                            sub,
-                            &format!("Copy URL ({})", c.domain),
-                            Some(copy_sel),
-                            Some(target),
-                            true,
-                            Some(&domain_url),
-                        );
-                        add_separator(sub);
-                    } else {
-                        add_menu_item_with_obj(
-                            sub,
-                            &format!("Open {}", c.domain),
-                            Some(open_url_sel),
-                            Some(target),
-                            true,
-                            Some(&domain_url),
-                        );
-                        add_menu_item_with_obj(
-                            sub,
-                            &format!("Copy URL ({})", c.domain),
-                            Some(copy_sel),
-                            Some(target),
-                            true,
-                            Some(&domain_url),
-                        );
-                        add_separator(sub);
-                    }
+                            add_menu_item_with_obj(
+                                sub,
+                                &format!("Open :{}", pub_p),
+                                Some(open_url_sel),
+                                Some(target),
+                                true,
+                                Some(&port_url),
+                            );
+                            add_menu_item_with_obj(
+                                sub,
+                                &format!("Open {}", c.domain),
+                                Some(open_url_sel),
+                                Some(target),
+                                true,
+                                Some(&domain_url),
+                            );
+                            add_menu_item_with_obj(
+                                sub,
+                                &format!("Copy URL (localhost:{})", pub_p),
+                                Some(copy_sel),
+                                Some(target),
+                                true,
+                                Some(&port_url),
+                            );
+                            add_menu_item_with_obj(
+                                sub,
+                                &format!("Copy URL ({})", c.domain),
+                                Some(copy_sel),
+                                Some(target),
+                                true,
+                                Some(&domain_url),
+                            );
+                            add_separator(sub);
+                        } else {
+                            add_menu_item_with_obj(
+                                sub,
+                                &format!("Open {}", c.domain),
+                                Some(open_url_sel),
+                                Some(target),
+                                true,
+                                Some(&domain_url),
+                            );
+                            add_menu_item_with_obj(
+                                sub,
+                                &format!("Copy URL ({})", c.domain),
+                                Some(copy_sel),
+                                Some(target),
+                                true,
+                                Some(&domain_url),
+                            );
+                            add_separator(sub);
+                        }
 
                     let shell_sel = sel_registerName(b"onOpenContainerShell:\0".as_ptr() as _);
                     add_menu_item_with_obj(
@@ -1102,18 +1211,30 @@ mod imp {
                 add_menu_item(menu, &more_title, Some(dash_sel), Some(target), true);
             }
         }
+    }
 
-        add_separator(menu);
+    add_separator(menu);
 
         // ═════════════════════════════════════════════════════════════════════════
         // 3. KUBERNETES (Top 5 Workloads & Services)
         // ═════════════════════════════════════════════════════════════════════════
         add_menu_item(menu, "KUBERNETES", None, None, false);
 
+        let is_starting_k8s = active_op
+            .as_ref()
+            .map(|o| o.description.contains("Kubernetes"))
+            .unwrap_or(false)
+            || snapshot.k8s_status_text.contains("Starting");
+
         if !snapshot.k8s_ready {
+            let k8s_status_label = if is_starting_k8s {
+                "Kubernetes: Starting...".to_string()
+            } else {
+                snapshot.k8s_status_text.clone()
+            };
             let parent_item = add_menu_item(
                 menu,
-                &format!("  {}", snapshot.k8s_status_text),
+                &format!("  {}", k8s_status_label),
                 None,
                 None,
                 true,
@@ -1125,14 +1246,30 @@ mod imp {
                 "Start Kubernetes",
                 Some(start_k8s_sel),
                 Some(target),
+                !is_starting_k8s,
+            );
+            let logs_sel = sel_registerName(b"onOpenK8sClusterLogs:\0".as_ptr() as _);
+            add_menu_item(
+                sub,
+                "View Cluster Logs",
+                Some(logs_sel),
+                Some(target),
                 true,
             );
             attach_submenu(parent_item, sub);
         } else {
-            add_menu_item(menu, "  ● k3s cluster", None, None, false);
+            let parent_item = add_menu_item(menu, "  ● k3s cluster", None, None, true);
+            let sub = create_submenu("Kubernetes");
+            let logs_sel = sel_registerName(b"onOpenK8sClusterLogs:\0".as_ptr() as _);
+            add_menu_item(sub, "View Cluster Logs", Some(logs_sel), Some(target), true);
+            let restart_sel = sel_registerName(b"onRestartK8s:\0".as_ptr() as _);
+            add_menu_item(sub, "Restart", Some(restart_sel), Some(target), !is_starting_k8s);
+            let stop_sel = sel_registerName(b"onStopK8s:\0".as_ptr() as _);
+            add_menu_item(sub, "Stop", Some(stop_sel), Some(target), !is_starting_k8s);
+            attach_submenu(parent_item, sub);
 
             if snapshot.k8s_services.is_empty() && snapshot.k8s_pods.is_empty() {
-                add_menu_item(menu, "  None", None, None, false);
+                add_menu_item(menu, "  (no workloads running)", None, None, false);
             } else {
                 let total_pods = snapshot.k8s_pods.len();
                 for pod in snapshot.k8s_pods.iter().take(5) {
@@ -1420,10 +1557,17 @@ end tell"#,
             );
             let name = from_ns_string(obj);
             if !name.is_empty() {
+                set_active_op(&format!("Starting {name}"));
                 std::thread::spawn(move || {
                     let exe = std::env::current_exe()
                         .unwrap_or_else(|_| std::path::PathBuf::from("mach"));
-                    let _ = std::process::Command::new(exe).args(["start", &name]).status();
+                    let st = std::process::Command::new(exe).args(["start", &name]).status();
+                    if st.map(|s| s.success()).unwrap_or(false) {
+                        send_macos_notification("Mach", &format!("Machine '{name}'"), "Virtual machine is now running and ready.");
+                    } else {
+                        send_macos_notification("Mach", &format!("Machine '{name}'"), "Failed to start virtual machine.");
+                    }
+                    clear_active_op();
                 });
             }
         }
@@ -1437,10 +1581,13 @@ end tell"#,
             );
             let name = from_ns_string(obj);
             if !name.is_empty() {
+                set_active_op(&format!("Stopping {name}"));
                 std::thread::spawn(move || {
                     let exe = std::env::current_exe()
                         .unwrap_or_else(|_| std::path::PathBuf::from("mach"));
                     let _ = std::process::Command::new(exe).args(["stop", &name]).status();
+                    send_macos_notification("Mach", &format!("Machine '{name}'"), "Virtual machine stopped.");
+                    clear_active_op();
                 });
             }
         }
@@ -1458,12 +1605,19 @@ end tell"#,
             );
             let name = from_ns_string(obj);
             if !name.is_empty() {
+                set_active_op(&format!("Restarting {name}"));
                 std::thread::spawn(move || {
                     let exe = std::env::current_exe()
                         .unwrap_or_else(|_| std::path::PathBuf::from("mach"));
-                    let _ = std::process::Command::new(exe)
+                    let st = std::process::Command::new(exe)
                         .args(["restart", &name])
                         .status();
+                    if st.map(|s| s.success()).unwrap_or(false) {
+                        send_macos_notification("Mach", &format!("Machine '{name}'"), "Virtual machine restarted and ready.");
+                    } else {
+                        send_macos_notification("Mach", &format!("Machine '{name}'"), "Restart failed.");
+                    }
+                    clear_active_op();
                 });
             }
         }
@@ -1597,21 +1751,121 @@ end tell"#,
     }
 
     extern "C" fn on_start_docker(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
+        set_active_op("Starting Docker Engine");
         std::thread::spawn(|| {
             let machctl_bin = resolve_machctl_bin();
-            let _ = std::process::Command::new(machctl_bin)
+            let st = std::process::Command::new(machctl_bin)
                 .args(["docker", "start"])
                 .status();
+            if st.map(|s| s.success()).unwrap_or(false) {
+                send_macos_notification("Mach", "Docker Engine", "Docker Engine is ready! Container runtime is active.");
+            } else {
+                send_macos_notification("Mach", "Docker Engine", "Failed to start Docker Engine. Check 'machctl docker logs'.");
+            }
+            clear_active_op();
         });
     }
 
-    extern "C" fn on_start_k8s(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
+    extern "C" fn on_stop_docker(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
+        set_active_op("Stopping Docker Engine");
         std::thread::spawn(|| {
             let machctl_bin = resolve_machctl_bin();
             let _ = std::process::Command::new(machctl_bin)
+                .args(["docker", "stop"])
+                .status();
+            send_macos_notification("Mach", "Docker Engine", "Docker Engine stopped.");
+            clear_active_op();
+        });
+    }
+
+    extern "C" fn on_restart_docker(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
+        set_active_op("Restarting Docker Engine");
+        std::thread::spawn(|| {
+            let machctl_bin = resolve_machctl_bin();
+            let st = std::process::Command::new(machctl_bin)
+                .args(["docker", "restart"])
+                .status();
+            if st.map(|s| s.success()).unwrap_or(false) {
+                send_macos_notification("Mach", "Docker Engine", "Docker Engine restarted and ready.");
+            } else {
+                send_macos_notification("Mach", "Docker Engine", "Docker restart encountered an error.");
+            }
+            clear_active_op();
+        });
+    }
+
+    extern "C" fn on_open_docker_logs(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
+        let machctl_bin = resolve_machctl_bin();
+        let script = format!(
+            r#"tell application "Terminal"
+    do script "{} docker logs -f"
+    activate
+end tell"#,
+            machctl_bin
+        );
+        let _ = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .spawn();
+    }
+
+    extern "C" fn on_start_k8s(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
+        set_active_op("Starting Kubernetes");
+        std::thread::spawn(|| {
+            let machctl_bin = resolve_machctl_bin();
+            let st = std::process::Command::new(machctl_bin)
                 .args(["k8s", "start"])
                 .status();
+            if st.map(|s| s.success()).unwrap_or(false) {
+                send_macos_notification("Mach", "Kubernetes", "K3s cluster is active and ready for kubectl.");
+            } else {
+                send_macos_notification("Mach", "Kubernetes", "Failed to start Kubernetes cluster. Check 'machctl k8s logs'.");
+            }
+            clear_active_op();
         });
+    }
+
+    extern "C" fn on_stop_k8s(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
+        set_active_op("Stopping Kubernetes");
+        std::thread::spawn(|| {
+            let machctl_bin = resolve_machctl_bin();
+            let _ = std::process::Command::new(machctl_bin)
+                .args(["k8s", "stop"])
+                .status();
+            send_macos_notification("Mach", "Kubernetes", "Kubernetes cluster stopped.");
+            clear_active_op();
+        });
+    }
+
+    extern "C" fn on_restart_k8s(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
+        set_active_op("Restarting Kubernetes");
+        std::thread::spawn(|| {
+            let machctl_bin = resolve_machctl_bin();
+            let st = std::process::Command::new(machctl_bin)
+                .args(["k8s", "restart"])
+                .status();
+            if st.map(|s| s.success()).unwrap_or(false) {
+                send_macos_notification("Mach", "Kubernetes", "Kubernetes cluster restarted and ready.");
+            } else {
+                send_macos_notification("Mach", "Kubernetes", "Kubernetes restart encountered an error.");
+            }
+            clear_active_op();
+        });
+    }
+
+    extern "C" fn on_open_k8s_cluster_logs(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
+        let machctl_bin = resolve_machctl_bin();
+        let script = format!(
+            r#"tell application "Terminal"
+    do script "{} k8s logs -f"
+    activate
+end tell"#,
+            machctl_bin
+        );
+        let _ = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .spawn();
     }
 
     extern "C" fn on_open_k8s_logs(
@@ -1752,6 +2006,7 @@ end tell"#,
     }
 
     extern "C" fn on_restart_all(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
+        set_active_op("Restarting All");
         std::thread::spawn(|| {
             let exe = std::env::current_exe()
                 .unwrap_or_else(|_| std::path::PathBuf::from("mach"));
@@ -1770,10 +2025,14 @@ end tell"#,
                                 .status();
                         }
                     }
+                    send_macos_notification("Mach", "All Services", "Restart completed.");
+                    clear_active_op();
                     return;
                 }
             }
             let _ = std::process::Command::new(&exe).arg("restart").status();
+            send_macos_notification("Mach", "All Services", "Restart completed.");
+            clear_active_op();
         });
     }
 
@@ -1840,6 +2099,20 @@ end tell"#,
             return;
         }
 
+        let active_op = {
+            let mut lock = ACTIVE_OP.write().unwrap();
+            if let Some(ref op) = *lock {
+                if op.started_at.elapsed() > std::time::Duration::from_secs(90) {
+                    *lock = None;
+                    None
+                } else {
+                    Some(op.clone())
+                }
+            } else {
+                None
+            }
+        };
+
         let snapshot = {
             let lock = CACHED_SNAPSHOT.read().unwrap();
             lock.clone().unwrap_or_default()
@@ -1849,7 +2122,20 @@ end tell"#,
             matches!(m.state, MachineState::Starting | MachineState::Creating)
         });
 
-        let tooltip = if let Some(m) = starting {
+        let is_working = active_op.is_some()
+            || starting.is_some()
+            || snapshot.docker_status_text.contains("Starting")
+            || snapshot.k8s_status_text.contains("Starting");
+
+        let title = if is_working {
+            " ⟳"
+        } else {
+            ""
+        };
+
+        let tooltip = if let Some(ref op) = active_op {
+            format!("{}...", op.description)
+        } else if let Some(m) = starting {
             format!("Starting {}...", m.name)
         } else if snapshot.docker_status_text.contains("Starting") {
             "Starting Docker Engine...".to_string()
@@ -1858,6 +2144,12 @@ end tell"#,
         } else {
             format!("mach v{}", env!("CARGO_PKG_VERSION"))
         };
+
+        msg_send_1(
+            button,
+            sel_registerName(b"setTitle:\0".as_ptr() as _),
+            ns_string(title),
+        );
 
         msg_send_1(
             button,
@@ -2178,7 +2470,21 @@ pub fn run_menu_bar() -> Result<()> {
     imp::run_menu_bar()
 }
 
+#[cfg(target_os = "macos")]
+pub(crate) use imp::{is_docker_socket_responding, is_k8s_api_responding};
+
 #[cfg(not(target_os = "macos"))]
 pub fn run_menu_bar() -> Result<()> {
     anyhow::bail!("mach Menu Bar is only supported on macOS");
 }
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn is_docker_socket_responding(_cfg: Option<&mach_common::config::MachConfig>) -> bool {
+    false
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn is_k8s_api_responding() -> bool {
+    false
+}
+

@@ -526,6 +526,16 @@ pub enum DockerAction {
         #[arg(short, long)]
         force: bool,
     },
+    /// View Docker daemon system logs
+    Logs {
+        /// Follow log output
+        #[arg(short, long)]
+        follow: bool,
+
+        /// Number of lines to show
+        #[arg(short = 'n', long, default_value = "50")]
+        lines: usize,
+    },
     /// Configure and ensure macOS docker context is connected to Mach (legacy)
     #[command(hide = true)]
     Setup {
@@ -552,6 +562,16 @@ pub enum K8sAction {
     Shell,
     /// Show Kubernetes cluster status
     Status,
+    /// View Kubernetes (K3s) daemon system logs
+    Logs {
+        /// Follow log output
+        #[arg(short, long)]
+        follow: bool,
+
+        /// Number of lines to show
+        #[arg(short = 'n', long, default_value = "50")]
+        lines: usize,
+    },
 }
 
 /// Subcommands for `mach daemon`.

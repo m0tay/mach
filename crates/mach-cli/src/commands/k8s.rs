@@ -150,17 +150,22 @@ pub async fn enable() -> Result<()> {
     // 3. Configure Docker runtime using fast installer
     crate::commands::docker::ensure_docker_installed(ip, &vm_name).await?;
 
-    let k3s_setup_script = r#"systemctl enable --now docker >/dev/null 2>&1;
-mkdir -p /etc/rancher/k3s;
+    let k3s_setup_script = r#"mkdir -p /etc/rancher/k3s;
 cat << 'EOF' > /etc/rancher/k3s/config.yaml
-docker: true
 disable:
   - traefik
 tls-san:
   - 127.0.0.1
   - k8s.mach.local
 EOF
-which k3s >/dev/null 2>&1 || curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --docker --disable traefik" sh -s -;
+which k3s >/dev/null 2>&1 || curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --disable traefik" sh -s -;
+if grep -q "docker" /etc/systemd/system/k3s.service 2>/dev/null; then
+    sed -i "s/'--docker'//g" /etc/systemd/system/k3s.service 2>/dev/null || true;
+    sed -i "s/--docker//g" /etc/systemd/system/k3s.service 2>/dev/null || true;
+    systemctl daemon-reload 2>/dev/null || true;
+    systemctl restart k3s 2>/dev/null || true;
+    docker ps -a --filter "name=k8s_" -q 2>/dev/null | xargs -r docker rm -f 2>/dev/null || true;
+fi
 systemctl enable --now k3s >/dev/null 2>&1;
 "#;
 
@@ -485,6 +490,36 @@ pub async fn status() -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Stream or show Kubernetes (K3s) daemon systemd logs from the infrastructure VM.
+pub async fn logs(follow: bool, lines: usize) -> Result<()> {
+    let cfg = MachConfig::load()?;
+    let m = crate::commands::docker::find_system_machine(&cfg.machines_dir)?
+        .ok_or_else(|| anyhow::anyhow!("Kubernetes infrastructure machine not found"))?;
+
+    if m.state != MachineState::Running {
+        anyhow::bail!("Kubernetes machine '{}' is not running (state: {:?})", m.config.name, m.state);
+    }
+
+    let ip = m.ip_address.ok_or_else(|| anyhow::anyhow!("Kubernetes machine has no IP address"))?;
+
+    let mut args = crate::ssh::mach_ssh_args();
+    args.extend([
+        "-t".to_string(),
+        format!("root@{ip}"),
+        format!("journalctl -u k3s -n {}{}", lines, if follow { " -f" } else { "" }),
+    ]);
+
+    let status = Command::new("ssh").args(&args).status()?;
+    if !status.success() {
+        if let Some(code) = status.code() {
+            if code != 130 { // 130 is Ctrl+C
+                tracing::debug!("ssh journalctl exited with status {code}");
+            }
+        }
+    }
     Ok(())
 }
 
