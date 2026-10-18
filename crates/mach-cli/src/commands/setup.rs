@@ -106,43 +106,15 @@ async fn run_ext(welcome: bool, to_stderr: bool) -> Result<()> {
         }
     }
 
-    // 6. Docker CLI context (if docker VM exists or docker binary is available on host)
-    let has_docker_vm = crate::commands::find_machine(&cfg.machines_dir, crate::commands::docker::DOCKER_VM_NAME)?
-        .is_some();
-    if has_docker_vm || cfg.docker.enabled {
-        let _ = crate::commands::docker::setup(false).await;
-        if welcome {
-            out_ln!("  \x1b[1;32m✓\x1b[0m Standard Docker CLI context 'mach' configured");
-        }
-    } else if let Some(bin) = crate::commands::find_binary("docker") {
-        let sock_path = cfg.data_dir.join("run").join("docker.sock");
-        let _ = std::process::Command::new(&bin).args(["context", "rm", "-f", "mach"]).output();
-        let _ = std::process::Command::new(&bin)
-            .args([
-                "context",
-                "create",
-                "mach",
-                "--docker",
-                &format!("host=unix://{}", sock_path.display()),
-                "--description",
-                "mach Docker Engine (Apple Silicon)",
-            ])
-            .output();
-        let _ = std::process::Command::new(&bin).args(["context", "use", "mach"]).output();
-        if welcome {
-            out_ln!("  \x1b[1;32m✓\x1b[0m Standard Docker CLI context 'mach' configured");
-        }
-    }
-
     if welcome {
         out_ln!("\n\x1b[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m");
         out_ln!(" \x1b[1;32m✓ Setup complete!\x1b[0m");
         out_ln!("\x1b[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\x1b[0m\n");
         out_ln!(" \x1b[1mQuick Start:\x1b[0m");
-        out_ln!("   • \x1b[1;32mmach\x1b[0m              Open Linux shell");
-        out_ln!("   • \x1b[1;32mmach <command>\x1b[0m    Run command in Linux (e.g. \x1b[33mmach uname -a\x1b[0m)");
-        out_ln!("   • \x1b[1;32mdocker ps\x1b[0m         Use standard macOS Docker CLI");
-        out_ln!("   • \x1b[1;34mmachctl --help\x1b[0m    Explore control plane & VM management\n");
+        out_ln!("   • \x1b[1;32mmach\x1b[0m                  Open Linux shell");
+        out_ln!("   • \x1b[1;32mmach <command>\x1b[0m        Run command in Linux (e.g. \x1b[33mmach uname -a\x1b[0m)");
+        out_ln!("   • \x1b[1;32mmachctl docker start\x1b[0m  Start on-demand Docker engine");
+        out_ln!("   • \x1b[1;34mmachctl --help\x1b[0m        Explore control plane & VM management\n");
     }
 
     Ok(())

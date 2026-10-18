@@ -20,7 +20,7 @@ pub async fn run(
     let cfg = MachConfig::load()?;
     let mut effective_cmd = command;
 
-    let target_name_opt = match machine_opt {
+    let mut target_name_opt = match machine_opt {
         Some(n) => Some(n),
         None => {
             if command.len() > 1 && find_machine(&cfg.machines_dir, &command[0])?.is_some() {
@@ -44,7 +44,12 @@ pub async fn run(
             eprintln!("No Linux machine found. Preparing your environment...");
             crate::commands::setup::run_streamlined(true).await?;
             eprintln!("\x1b[1;32m✓\x1b[0m Environment ready!\n");
-            MachConfig::load()?
+            let reloaded_cfg = MachConfig::load()?;
+            if target_name_opt.is_none() && effective_cmd.len() > 1 && find_machine(&reloaded_cfg.machines_dir, &effective_cmd[0])?.is_some() {
+                target_name_opt = Some(effective_cmd[0].as_str());
+                effective_cmd = &effective_cmd[1..];
+            }
+            reloaded_cfg
         } else {
             cfg
         }
