@@ -112,9 +112,18 @@ pub fn ensure_tls_cert(data_dir: &Path) -> Result<TlsConfig> {
     })
 }
 
+fn is_verbose() -> bool {
+    std::env::args().any(|a| a == "-v" || a == "--verbose")
+        || tracing::enabled!(tracing::Level::DEBUG)
+}
+
 /// Generates a self-signed Root CA valid for 10 years (3650 days).
 fn generate_root_ca(ca_cert: &Path, ca_key: &Path) -> Result<()> {
-    println!("\x1b[1;36m➜\x1b[0m Generating persistent mach Root CA in {}...", ca_cert.display());
+    if is_verbose() {
+        println!("\x1b[1;36m➜\x1b[0m Generating persistent mach Root CA in {}...", ca_cert.display());
+    } else {
+        tracing::debug!("Generating persistent mach Root CA in {}...", ca_cert.display());
+    }
 
     let output = Command::new("/usr/bin/openssl")
         .args([
@@ -163,7 +172,11 @@ fn generate_wildcard_cert(
     leaf_cert: &Path,
     leaf_key: &Path,
 ) -> Result<()> {
-    println!("\x1b[1;36m➜\x1b[0m Generating wildcard TLS certificate for *.mach.local...");
+    if is_verbose() {
+        println!("\x1b[1;36m➜\x1b[0m Generating wildcard TLS certificate for *.mach.local...");
+    } else {
+        tracing::debug!("Generating wildcard TLS certificate for *.mach.local...");
+    }
 
     let ssl_dir = leaf_cert.parent().context("Invalid cert path parent")?;
     let csr_path = ssl_dir.join(".mach-leaf.csr");

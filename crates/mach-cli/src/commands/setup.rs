@@ -17,10 +17,12 @@ pub async fn run_streamlined(to_stderr: bool) -> Result<()> {
 async fn run_ext(welcome: bool, to_stderr: bool) -> Result<()> {
     macro_rules! out_ln {
         ($($arg:tt)*) => {
-            if to_stderr {
-                eprintln!($($arg)*);
-            } else {
-                println!($($arg)*);
+            if welcome {
+                if to_stderr {
+                    eprintln!($($arg)*);
+                } else {
+                    println!($($arg)*);
+                }
             }
         };
     }
@@ -79,29 +81,46 @@ async fn run_ext(welcome: bool, to_stderr: bool) -> Result<()> {
         Some(_) => {
             if welcome {
                 out_ln!("  \x1b[1;36m➜\x1b[0m Starting Debian machine...");
-            }
-            crate::commands::start::run_ext(Some("debian"), to_stderr).await?;
-            if welcome {
+                crate::commands::start::run_ext(Some("debian"), to_stderr).await?;
                 out_ln!("  \x1b[1;32m✓\x1b[0m Primary Debian machine is running");
+            } else {
+                crate::commands::start::run_quiet(Some("debian")).await?;
             }
         }
         None => {
-            crate::commands::create::run_ext(
-                "debian",
-                Some("debian"),
-                2,
-                2048,
-                20,
-                "aarch64",
-                false,
-                false,
-                to_stderr,
-            )
-            .await?;
-            let _ = crate::commands::default_cmd::run(Some("debian")).await;
-            crate::commands::start::run_ext(Some("debian"), to_stderr).await?;
             if welcome {
+                crate::commands::create::run_ext(
+                    "debian",
+                    Some("debian"),
+                    2,
+                    2048,
+                    20,
+                    "aarch64",
+                    false,
+                    false,
+                    to_stderr,
+                )
+                .await?;
+                let mut cfg = MachConfig::load().unwrap_or_default();
+                cfg.default_machine = Some("debian".to_string());
+                let _ = cfg.save();
+                crate::commands::start::run_ext(Some("debian"), to_stderr).await?;
                 out_ln!("  \x1b[1;32m✓\x1b[0m Primary Debian machine created and running");
+            } else {
+                crate::commands::create::run_ext_quiet(
+                    "debian",
+                    Some("debian"),
+                    2,
+                    2048,
+                    20,
+                    "aarch64",
+                    false,
+                )
+                .await?;
+                let mut cfg = MachConfig::load().unwrap_or_default();
+                cfg.default_machine = Some("debian".to_string());
+                let _ = cfg.save();
+                crate::commands::start::run_quiet(Some("debian")).await?;
             }
         }
     }
