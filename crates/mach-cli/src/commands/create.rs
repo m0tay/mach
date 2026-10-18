@@ -163,7 +163,11 @@ pub async fn run_with_isolated(
         machine_name,
         machine.short_id()
     );
-    println!("\nRun \x1b[1;34mmach start {}\x1b[0m to boot the machine.", machine_name);
+    println!("\nNext steps:");
+    println!("  ➜ To start machine:   \x1b[1;34mmach start {}\x1b[0m", machine_name);
+    println!("  ➜ To open shell:      \x1b[1;32mmach\x1b[0m (or \x1b[1;32mmach shell {}\x1b[0m)", machine_name);
+    println!("  ➜ To run commands:    \x1b[1;32mmach uname -a\x1b[0m");
+    println!("  ➜ To view dashboard:  \x1b[1;34mmachctl top\x1b[0m");
 
     Ok(())
 }

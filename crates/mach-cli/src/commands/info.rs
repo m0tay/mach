@@ -143,5 +143,10 @@ pub async fn run(name: Option<&str>) -> Result<()> {
     println!("  Domain:       {}.mach.local", machine.config.name);
     println!("  Created:      {}", machine.created_at.to_rfc2822());
 
+    println!("\nNext steps:");
+    println!("  ➜ To open shell:      \x1b[1;32mmach\x1b[0m (or \x1b[1;32mmach shell {}\x1b[0m)", machine.config.name);
+    println!("  ➜ To run commands:    \x1b[1;32mmach uname -a\x1b[0m (or \x1b[1;32mmach -m {} uname -a\x1b[0m)", machine.config.name);
+    println!("  ➜ To view dashboard:  \x1b[1;34mmachctl top\x1b[0m");
+
     Ok(())
 }
