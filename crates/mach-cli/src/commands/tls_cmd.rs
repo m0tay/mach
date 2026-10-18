@@ -81,36 +81,43 @@ pub async fn uninstall() -> Result<()> {
     let cfg = MachConfig::load().unwrap_or_default();
     let ca_cert = ca_cert_path(&cfg.data_dir);
 
-    if !ca_cert.exists() {
-        println!(
-            "\x1b[1;33m⚠\x1b[0m Mach Root CA certificate not found at {}. Nothing to uninstall.",
-            ca_cert.display()
-        );
-        return Ok(());
-    }
-
     println!("\x1b[1;36m➜\x1b[0m Removing Mach Root CA from macOS Keychain...");
 
-    // Remove from admin domain
-    let out_admin = Command::new("/usr/bin/security")
-        .args(["remove-trusted-cert", "-d", ca_cert.to_str().unwrap()])
-        .output()
-        .await;
+    let mut admin_ok = false;
+    let mut user_ok = false;
 
-    // Remove from user domain
-    let out_user = Command::new("/usr/bin/security")
-        .args(["remove-trusted-cert", ca_cert.to_str().unwrap()])
-        .output()
-        .await;
+    if ca_cert.exists() {
+        // Remove from admin domain
+        let out_admin = Command::new("/usr/bin/security")
+            .args(["remove-trusted-cert", "-d", ca_cert.to_str().unwrap()])
+            .output()
+            .await;
 
-    // Delete matching certificate entries
-    let _ = Command::new("/usr/bin/security")
-        .args(["delete-certificate", "-c", ROOT_CA_COMMON_NAME])
-        .output()
-        .await;
+        // Remove from user domain
+        let out_user = Command::new("/usr/bin/security")
+            .args(["remove-trusted-cert", ca_cert.to_str().unwrap()])
+            .output()
+            .await;
 
-    let admin_ok = out_admin.as_ref().map(|o| o.status.success()).unwrap_or(false);
-    let user_ok = out_user.as_ref().map(|o| o.status.success()).unwrap_or(false);
+        admin_ok = out_admin.as_ref().map(|o| o.status.success()).unwrap_or(false);
+        user_ok = out_user.as_ref().map(|o| o.status.success()).unwrap_or(false);
+    }
+
+    // Delete matching certificate entries by common name
+    let ca_names = [
+        ROOT_CA_COMMON_NAME,
+        "Mach Local Root CA",
+        "Mach Root CA",
+        "Norb Local Root CA",
+        "Norb Root CA",
+    ];
+
+    for name in &ca_names {
+        let _ = Command::new("/usr/bin/security")
+            .args(["delete-certificate", "-c", name])
+            .output()
+            .await;
+    }
 
     if admin_ok || user_ok {
         println!("\x1b[1;32m✔\x1b[0m Mach Root CA trust settings successfully removed from macOS Keychain.");

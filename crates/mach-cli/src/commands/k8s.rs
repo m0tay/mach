@@ -266,8 +266,13 @@ pub async fn enable() -> Result<()> {
             });
 
         // 3. Remove any stale 'mach' entries from main config before merging
+        if let Ok(content) = fs::read_to_string(&main_config) {
+            if let Ok(Some(cleaned)) = clean_kubeconfig_yaml(&content) {
+                let _ = fs::write(&main_config, cleaned);
+            }
+        }
         if let Some(main_str) = main_config.to_str() {
-            for old in &["mach"] {
+            for old in &["mach", "norb"] {
                 let _ = Command::new("kubectl")
                     .args(["--kubeconfig", main_str, "config", "delete-cluster", old])
                     .output();
@@ -423,4 +428,292 @@ pub async fn status() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Surgically clean Mach entries from a kubeconfig YAML string.
+///
+/// Removes cluster "mach", context "mach", and user "mach" (and legacy "norb").
+/// If `current-context` is "mach", points it to the first remaining context,
+/// or removes `current-context` if no contexts remain.
+///
+/// Returns:
+/// - `Ok(None)`: if 0 clusters and 0 contexts remain (indicating the file was solely Mach).
+/// - `Ok(Some(yaml))`: if other clusters/contexts remain, with all other entries intact.
+pub fn clean_kubeconfig_yaml(yaml_content: &str) -> Result<Option<String>> {
+    let mut doc: serde_yaml::Value = serde_yaml::from_str(yaml_content)
+        .context("Failed to parse kubeconfig YAML")?;
+
+    let mapping = match doc.as_mapping_mut() {
+        Some(m) => m,
+        None => bail!("kubeconfig is not a valid YAML mapping"),
+    };
+
+    let clusters_key = serde_yaml::Value::String("clusters".to_string());
+    let contexts_key = serde_yaml::Value::String("contexts".to_string());
+    let users_key = serde_yaml::Value::String("users".to_string());
+    let current_ctx_key = serde_yaml::Value::String("current-context".to_string());
+
+    // 1. Filter "clusters"
+    if let Some(clusters_val) = mapping.get_mut(&clusters_key) {
+        if let Some(seq) = clusters_val.as_sequence_mut() {
+            seq.retain(|item| {
+                let name = item.get("name").and_then(|v| v.as_str());
+                name != Some("mach") && name != Some("norb")
+            });
+        }
+    }
+
+    // 2. Filter "users"
+    if let Some(users_val) = mapping.get_mut(&users_key) {
+        if let Some(seq) = users_val.as_sequence_mut() {
+            seq.retain(|item| {
+                let name = item.get("name").and_then(|v| v.as_str());
+                name != Some("mach") && name != Some("norb")
+            });
+        }
+    }
+
+    // 3. Filter "contexts" and collect remaining context names
+    let mut remaining_contexts = Vec::new();
+    if let Some(contexts_val) = mapping.get_mut(&contexts_key) {
+        if let Some(seq) = contexts_val.as_sequence_mut() {
+            seq.retain(|item| {
+                let name = item.get("name").and_then(|v| v.as_str());
+                let is_mach = name == Some("mach") || name == Some("norb");
+                if !is_mach {
+                    if let Some(n) = name {
+                        remaining_contexts.push(n.to_string());
+                    }
+                }
+                !is_mach
+            });
+        }
+    }
+
+    // 4. Update current-context
+    let current_ctx_is_mach = mapping
+        .get(&current_ctx_key)
+        .and_then(|v| v.as_str())
+        .map(|s| s == "mach" || s == "norb")
+        .unwrap_or(false);
+
+    if current_ctx_is_mach {
+        if let Some(first_ctx) = remaining_contexts.first() {
+            mapping.insert(
+                current_ctx_key.clone(),
+                serde_yaml::Value::String(first_ctx.clone()),
+            );
+        } else {
+            mapping.remove(&current_ctx_key);
+        }
+    }
+
+    // 5. Count remaining clusters and contexts
+    let remaining_clusters_count = mapping
+        .get(&clusters_key)
+        .and_then(|v| v.as_sequence())
+        .map(|s| s.len())
+        .unwrap_or(0);
+
+    let remaining_contexts_count = mapping
+        .get(&contexts_key)
+        .and_then(|v| v.as_sequence())
+        .map(|s| s.len())
+        .unwrap_or(0);
+
+    if remaining_clusters_count == 0 && remaining_contexts_count == 0 {
+        return Ok(None);
+    }
+
+    let serialized = serde_yaml::to_string(&doc)
+        .context("Failed to serialize cleaned kubeconfig YAML")?;
+    Ok(Some(serialized))
+}
+
+/// Clean Mach Kubernetes integration from `~/.kube` directory.
+///
+/// Removes cluster "mach", context "mach", and user "mach" from `~/.kube/config`.
+/// If after removing Mach entries the file has 0 clusters and 0 contexts, deletes `~/.kube/config`.
+/// If other clusters/contexts remain (e.g. minikube, kind, EKS), preserves them completely.
+/// Cleans up any `~/.kube/config.mach` and `~/.kube/config.bak.*` backup files.
+pub fn clean_kubeconfig(kube_dir: &std::path::Path) -> Result<()> {
+    let main_config = kube_dir.join("config");
+    if main_config.exists() {
+        if let Ok(content) = fs::read_to_string(&main_config) {
+            match clean_kubeconfig_yaml(&content) {
+                Ok(Some(cleaned_yaml)) => {
+                    fs::write(&main_config, cleaned_yaml)
+                        .with_context(|| format!("Failed to update {}", main_config.display()))?;
+                }
+                Ok(None) => {
+                    let _ = fs::remove_file(&main_config);
+                }
+                Err(err) => {
+                    tracing::warn!("Failed to parse kubeconfig YAML: {err}");
+                }
+            }
+        }
+    }
+
+    // Clean up ~/.kube/config.mach and config.norb
+    let mach_config = kube_dir.join("config.mach");
+    if mach_config.exists() {
+        let _ = fs::remove_file(mach_config);
+    }
+    let norb_config = kube_dir.join("config.norb");
+    if norb_config.exists() {
+        let _ = fs::remove_file(norb_config);
+    }
+
+    // Clean up any ~/.kube/config.bak.* backup files created by Mach
+    if let Ok(entries) = fs::read_dir(kube_dir) {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let name_str = file_name.to_string_lossy();
+            if name_str.starts_with("config.bak.")
+                || name_str.starts_with("config.mach.bak")
+                || name_str.starts_with("config.norb.bak")
+            {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_clean_kubeconfig_yaml_mach_only_deletes() {
+        let yaml = "\
+apiVersion: v1
+kind: Config
+preferences: {}
+current-context: mach
+clusters:
+- cluster:
+    server: https://127.0.0.1:26443
+  name: mach
+contexts:
+- context:
+    cluster: mach
+    user: mach
+  name: mach
+users:
+- name: mach
+  user:
+    client-certificate-data: LS0t...
+";
+        let res = clean_kubeconfig_yaml(yaml).expect("parse succeeded");
+        assert_eq!(res, None, "should return None indicating 0 clusters and 0 contexts");
+    }
+
+    #[test]
+    fn test_clean_kubeconfig_yaml_preserves_minikube_and_switches_context() {
+        let yaml = "\
+apiVersion: v1
+kind: Config
+preferences: {}
+current-context: mach
+clusters:
+- cluster:
+    server: https://192.168.49.2:8443
+  name: minikube
+- cluster:
+    server: https://127.0.0.1:26443
+  name: mach
+contexts:
+- context:
+    cluster: mach
+    user: mach
+  name: mach
+- context:
+    cluster: minikube
+    user: minikube
+  name: minikube
+users:
+- name: mach
+  user:
+    client-certificate-data: LS0t...
+- name: minikube
+  user:
+    client-certificate: /home/.minikube/client.crt
+";
+        let res = clean_kubeconfig_yaml(yaml).expect("parse succeeded");
+        assert!(res.is_some());
+        let cleaned = res.unwrap();
+
+        assert!(!cleaned.contains("name: mach"));
+        assert!(cleaned.contains("name: minikube"));
+        assert!(cleaned.contains("current-context: minikube"));
+        assert!(cleaned.contains("https://192.168.49.2:8443"));
+    }
+
+    #[test]
+    fn test_clean_kubeconfig_yaml_preserves_unrelated_current_context() {
+        let yaml = "\
+apiVersion: v1
+kind: Config
+preferences: {}
+current-context: kind-kind
+clusters:
+- cluster:
+    server: https://127.0.0.1:26443
+  name: mach
+- cluster:
+    server: https://127.0.0.1:6443
+  name: kind-kind
+contexts:
+- context:
+    cluster: kind-kind
+    user: kind-kind
+  name: kind-kind
+- context:
+    cluster: mach
+    user: mach
+  name: mach
+users:
+- name: kind-kind
+  user:
+    client-certificate-data: LS0t...
+- name: mach
+  user:
+    client-certificate-data: LS0t...
+";
+        let res = clean_kubeconfig_yaml(yaml).expect("parse succeeded");
+        assert!(res.is_some());
+        let cleaned = res.unwrap();
+
+        assert!(!cleaned.contains("name: mach"));
+        assert!(cleaned.contains("current-context: kind-kind"));
+    }
+
+    #[test]
+    fn test_clean_kubeconfig_dir_deletes_file_and_backups() {
+        let temp_dir = std::env::temp_dir().join(format!("mach-kube-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let cfg = temp_dir.join("config");
+        let mach_cfg = temp_dir.join("config.mach");
+        let bak_cfg = temp_dir.join("config.bak.1700000000");
+
+        fs::write(
+            &cfg,
+            "apiVersion: v1\nclusters:\n- cluster:\n    server: https://127.0.0.1:26443\n  name: mach\ncontexts:\n- context:\n    cluster: mach\n    user: mach\n  name: mach\ncurrent-context: mach\n",
+        )
+        .unwrap();
+        fs::write(&mach_cfg, "dummy").unwrap();
+        fs::write(&bak_cfg, "dummy backup").unwrap();
+
+        clean_kubeconfig(&temp_dir).unwrap();
+
+        assert!(!cfg.exists(), "config should be deleted");
+        assert!(!mach_cfg.exists(), "config.mach should be deleted");
+        assert!(!bak_cfg.exists(), "config.bak.* should be deleted");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
 }

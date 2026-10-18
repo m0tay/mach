@@ -67,7 +67,7 @@ pub fn new_ssh_command(ip: &IpAddr, user: &str) -> Command {
 
 /// Mach managed SSH configuration block.
 pub const MACH_SSH_CONFIG_BLOCK: &str = "\
-# BEGIN MACH MANAGED BLOCK
+# BEGIN MACH MANAGED BLOCK - DO NOT EDIT MANUALLY
 Host *.mach.local *.mach mach
     User root
     IdentityFile ~/.mach/ssh/id_ed25519
@@ -78,20 +78,37 @@ Host *.mach.local *.mach mach
 
 /// Idempotently update or insert the Mach managed block within an SSH config string.
 pub fn update_ssh_config_content(content: &str) -> String {
-    const BEGIN_MARKER: &str = "# BEGIN MACH MANAGED BLOCK";
-    const END_MARKER: &str = "# END MACH MANAGED BLOCK";
+    const BEGIN_MARKERS: &[&str] = &[
+        "# BEGIN MACH MANAGED BLOCK - DO NOT EDIT MANUALLY",
+        "# BEGIN MACH MANAGED BLOCK",
+        "# BEGIN NORB MANAGED BLOCK - DO NOT EDIT MANUALLY",
+        "# BEGIN NORB MANAGED BLOCK",
+    ];
+    const END_MARKERS: &[&str] = &[
+        "# END MACH MANAGED BLOCK",
+        "# END NORB MANAGED BLOCK",
+    ];
 
-    if let (Some(start), Some(end)) = (content.find(BEGIN_MARKER), content.find(END_MARKER)) {
-        if start <= end {
-            let block_end = end + END_MARKER.len();
-            let mut result = String::with_capacity(content.len() + MACH_SSH_CONFIG_BLOCK.len());
-            result.push_str(&content[..start]);
-            result.push_str(MACH_SSH_CONFIG_BLOCK);
-            result.push_str(&content[block_end..]);
-            if !result.ends_with('\n') {
-                result.push('\n');
+    for begin in BEGIN_MARKERS {
+        if let Some(start) = content.find(begin) {
+            for end in END_MARKERS {
+                if let Some(pos) = content[start..].find(end) {
+                    let finish = start + pos;
+                    let mut block_end = finish + end.len();
+                    if content[block_end..].starts_with('\n') {
+                        block_end += 1;
+                    }
+                    let mut result = String::with_capacity(content.len() + MACH_SSH_CONFIG_BLOCK.len());
+                    result.push_str(&content[..start]);
+                    result.push_str(MACH_SSH_CONFIG_BLOCK);
+                    result.push('\n');
+                    result.push_str(&content[block_end..]);
+                    if !result.ends_with('\n') {
+                        result.push('\n');
+                    }
+                    return result;
+                }
             }
-            return result;
         }
     }
 
@@ -171,6 +188,68 @@ pub fn sync_ssh_config_to_dir(ssh_dir: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// Remove any Mach (or legacy Norb) managed block from an SSH config string.
+/// Only lines strictly between and including the block markers are removed.
+/// All user hosts, comments, and settings are preserved intact.
+pub fn remove_mach_ssh_config_content(content: &str) -> String {
+    let mut in_block = false;
+    let mut kept_lines = Vec::new();
+    let mut was_in_block = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let is_begin = trimmed.starts_with("# BEGIN MACH MANAGED BLOCK")
+            || trimmed.starts_with("# BEGIN NORB MANAGED BLOCK");
+        let is_end = trimmed.starts_with("# END MACH MANAGED BLOCK")
+            || trimmed.starts_with("# END NORB MANAGED BLOCK");
+
+        if is_begin {
+            in_block = true;
+            was_in_block = true;
+            continue;
+        }
+
+        if in_block {
+            if is_end {
+                in_block = false;
+            }
+            continue;
+        }
+
+        if is_end {
+            continue;
+        }
+
+        kept_lines.push(line);
+    }
+
+    if !was_in_block {
+        return content.to_string();
+    }
+
+    // Collapse consecutive blank lines where the block was excised
+    let mut cleaned_lines = Vec::new();
+    let mut prev_blank = false;
+    for line in kept_lines {
+        let is_blank = line.trim().is_empty();
+        if is_blank && prev_blank {
+            continue;
+        }
+        prev_blank = is_blank;
+        cleaned_lines.push(line);
+    }
+
+    let joined = cleaned_lines.join("\n");
+    let trimmed = joined.trim();
+    if trimmed.is_empty() {
+        String::new()
+    } else {
+        let mut res = trimmed.to_string();
+        res.push('\n');
+        res
+    }
+}
+
 /// Remove any Mach managed block from `~/.ssh/config`.
 pub fn remove_mach_ssh_config_from_dir(ssh_dir: &std::path::Path) -> Result<()> {
     let config_path = ssh_dir.join("config");
@@ -181,32 +260,18 @@ pub fn remove_mach_ssh_config_from_dir(ssh_dir: &std::path::Path) -> Result<()> 
     let text = fs::read_to_string(&config_path)
         .with_context(|| format!("failed to read {}", config_path.display()))?;
 
-    const BEGIN_MARKER: &str = "# BEGIN MACH MANAGED BLOCK";
-    const END_MARKER: &str = "# END MACH MANAGED BLOCK";
-    const LEGACY_BEGIN_MARKER: &str = "# BEGIN NORB MANAGED BLOCK";
-    const LEGACY_END_MARKER: &str = "# END NORB MANAGED BLOCK";
-
-    let mut cleaned = text.clone();
-    for (begin, end) in &[(BEGIN_MARKER, END_MARKER), (LEGACY_BEGIN_MARKER, LEGACY_END_MARKER)] {
-        if let (Some(start), Some(finish)) = (cleaned.find(begin), cleaned.find(end)) {
-            if start <= finish {
-                let block_end = finish + end.len();
-                let mut res = String::new();
-                res.push_str(&cleaned[..start]);
-                res.push_str(&cleaned[block_end..]);
-                cleaned = res;
-            }
-        }
-    }
+    let cleaned = remove_mach_ssh_config_content(&text);
 
     let trimmed = cleaned.trim();
     if trimmed.is_empty() {
         let _ = fs::remove_file(&config_path);
     } else {
-        let mut final_text = trimmed.to_string();
-        final_text.push('\n');
-        fs::write(&config_path, final_text.as_bytes())?;
+        fs::write(&config_path, cleaned.as_bytes())?;
     }
+
+    // Clean up any safety backups created by Mach
+    let _ = fs::remove_file(ssh_dir.join("config.mach-bak"));
+    let _ = fs::remove_file(ssh_dir.join("config.norb-bak"));
 
     Ok(())
 }
@@ -296,4 +361,104 @@ mod tests {
 
         let _ = fs::remove_dir_all(&temp_dir);
     }
+
+    #[test]
+    fn test_remove_mach_ssh_config_content_only_mach() {
+        let content = "\
+# BEGIN MACH MANAGED BLOCK - DO NOT EDIT MANUALLY
+Host *.mach.local *.mach mach
+    User root
+    IdentityFile ~/.mach/ssh/id_ed25519
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+    ForwardAgent yes
+# END MACH MANAGED BLOCK
+";
+        let cleaned = remove_mach_ssh_config_content(content);
+        assert_eq!(cleaned, "");
+    }
+
+    #[test]
+    fn test_remove_mach_ssh_config_content_preserves_user_hosts() {
+        let original = "\
+# My personal server
+Host personal
+    HostName home.example.com
+    User me
+    Port 2222
+
+# BEGIN MACH MANAGED BLOCK - DO NOT EDIT MANUALLY
+Host *.mach.local *.mach mach
+    User root
+    IdentityFile ~/.mach/ssh/id_ed25519
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+    ForwardAgent yes
+# END MACH MANAGED BLOCK
+
+Host work
+    HostName work.corp.internal
+    User developer
+";
+        let cleaned = remove_mach_ssh_config_content(original);
+        let expected = "\
+# My personal server
+Host personal
+    HostName home.example.com
+    User me
+    Port 2222
+
+Host work
+    HostName work.corp.internal
+    User developer
+";
+        assert_eq!(cleaned, expected);
+    }
+
+    #[test]
+    fn test_remove_mach_ssh_config_content_legacy_norb() {
+        let original = "\
+Host github.com
+    User git
+
+# BEGIN NORB MANAGED BLOCK
+Host *.norb.local norb
+    User root
+# END NORB MANAGED BLOCK
+";
+        let cleaned = remove_mach_ssh_config_content(original);
+        assert_eq!(cleaned, "Host github.com\n    User git\n");
+    }
+
+    #[test]
+    fn test_remove_mach_ssh_config_from_dir_deletes_when_empty() {
+        let temp_dir = std::env::temp_dir().join(format!("mach-ssh-clean-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let config_file = temp_dir.join("config");
+        fs::write(&config_file, MACH_SSH_CONFIG_BLOCK).unwrap();
+
+        let res = remove_mach_ssh_config_from_dir(&temp_dir);
+        assert!(res.is_ok());
+        assert!(!config_file.exists());
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_remove_mach_ssh_config_from_dir_preserves_user_file() {
+        let temp_dir = std::env::temp_dir().join(format!("mach-ssh-clean-user-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let config_file = temp_dir.join("config");
+        let initial = "Host bastion\n    User jump\n\n# BEGIN MACH MANAGED BLOCK - DO NOT EDIT MANUALLY\nHost *.mach.local\n# END MACH MANAGED BLOCK\n";
+        fs::write(&config_file, initial).unwrap();
+
+        let res = remove_mach_ssh_config_from_dir(&temp_dir);
+        assert!(res.is_ok());
+        assert!(config_file.exists());
+        let final_text = fs::read_to_string(&config_file).unwrap();
+        assert_eq!(final_text, "Host bastion\n    User jump\n");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
 }
+
