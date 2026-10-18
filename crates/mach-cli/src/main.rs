@@ -12,6 +12,7 @@ pub mod dns;
 pub mod images;
 pub mod menu;
 pub mod mdns;
+pub mod mirrors;
 pub mod nfs;
 pub mod port_forward;
 pub mod proxy;
