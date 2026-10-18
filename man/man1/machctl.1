@@ -1,4 +1,4 @@
-.TH MACHCTL 1 "October 2026" "Mach 0.13.0" "Machctl Manual"
+.TH MACHCTL 1 "October 2026" "Mach 0.14.0" "Machctl Manual"
 .SH NAME
 machctl \- administrative control plane for Mach Linux machines, containers, and Kubernetes
 .SH SYNOPSIS
@@ -94,21 +94,33 @@ Mount a Linux machine's filesystem or open it in macOS Finder (\fB~/Mach/machine
 
 .SH CONTAINER & KUBERNETES COMMANDS
 .TP
-.BI docker " setup [" \-\-system "]"
-Configure Docker CLI context \fBmach\fR pointing to the guest VM's Docker socket. With \fB\-\-system\fR, creates a system-wide symlink at \fB/var/run/docker.sock\fR for VS Code Dev Containers and Testcontainers.
-
+.BI docker " start [" \-\-system "]"
+Start the Docker engine inside the system infrastructure VM and configure the macOS Docker CLI context. With \fB\-\-system\fR, creates a system-wide symlink at \fB/var/run/docker.sock\fR.
+.TP
+.BI docker " stop"
+Stop the Docker engine and terminate background socket forwarding.
+.TP
+.BI docker " restart"
+Restart the Docker engine.
+.TP
+.BI docker " logs [" \-f "] [" \-n " " N "]"
+View Docker daemon system logs.
 .TP
 .BI docker " status"
 Display current Docker daemon status and API responsiveness.
 
 .TP
-.BI k8s " enable [" \-\-cpus " " N "] [" \-\-memory " " MiB "]"
-Provision and start a dedicated, zero-overhead Kubernetes (K3s) node. Automatically generates and merges credentials into \fB~/.kube/config\fR without disturbing existing contexts.
-
+.BI k8s " enable"
+Provision and start a dedicated, zero-overhead Kubernetes (K3s) cluster. Automatically configures \fB~/.kube/config\fR.
 .TP
 .BI k8s " disable"
-Stop and shut down the local Kubernetes node.
-
+Disable the local Kubernetes cluster and terminate API forwarding.
+.TP
+.BI k8s " restart"
+Restart the Kubernetes cluster.
+.TP
+.BI k8s " logs [" \-f "] [" \-n " " N "]"
+View Kubernetes (K3s) daemon system logs.
 .TP
 .BI k8s " status"
 Display Kubernetes cluster health and node status.

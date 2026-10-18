@@ -406,7 +406,7 @@ pub async fn stop() -> Result<()> {
         }
     }
 
-    println!("\x1b[1;32m✓\x1b[0m Kubernetes cluster stopped.");
+    println!("\x1b[1;32m✓\x1b[0m Kubernetes cluster disabled.");
     Ok(())
 }
 
@@ -470,23 +470,23 @@ pub async fn status() -> Result<()> {
                 if is_k3s_active {
                     println!("\x1b[1;33m◐\x1b[0m Kubernetes service is active on {}, but API tunnel is disconnected", vm_name);
                     println!("  API Server:  \x1b[1;33m○\x1b[0m \x1b[1;33mhttps://127.0.0.1:26443\x1b[0m (not responding)");
-                    println!("               Run \x1b[1;34mmachctl k8s start\x1b[0m to restore the tunnel.");
+                    println!("               Run \x1b[1;34mmachctl k8s enable\x1b[0m to restore the tunnel.");
                 } else {
-                    println!("\x1b[1;33m○\x1b[0m Kubernetes cluster is \x1b[1;33mstopped\x1b[0m (run 'machctl k8s start' to start)");
+                    println!("\x1b[1;33m○\x1b[0m Kubernetes cluster is \x1b[1;33mdisabled\x1b[0m (run 'machctl k8s enable' to enable)");
                     println!("  API Server:  \x1b[1;33m○ stopped\x1b[0m");
                 }
             }
         }
         Some(m) => {
             terminate_k8s_ssh_tunnel();
-            println!("\x1b[1;33m○\x1b[0m Kubernetes is \x1b[1;33mstopped\x1b[0m (infrastructure VM {} is {})", vm_name, m.state);
-            println!("  API Server:  \x1b[1;33m○ stopped (run 'machctl k8s start')\x1b[0m");
+            println!("\x1b[1;33m○\x1b[0m Kubernetes is \x1b[1;33mdisabled\x1b[0m (infrastructure VM {} is {})", vm_name, m.state);
+            println!("  API Server:  \x1b[1;33m○ stopped (run 'machctl k8s enable')\x1b[0m");
         }
         None => {
             terminate_k8s_ssh_tunnel();
             println!("\x1b[1;31m○\x1b[0m Kubernetes is not installed.");
-            println!("  API Server:  \x1b[1;33m○ stopped (run 'machctl k8s start')\x1b[0m");
-            println!("  Run \x1b[1;34mmachctl k8s start\x1b[0m to provision a lightweight local cluster.");
+            println!("  API Server:  \x1b[1;33m○ stopped (run 'machctl k8s enable')\x1b[0m");
+            println!("  Run \x1b[1;34mmachctl k8s enable\x1b[0m to provision a lightweight local cluster.");
         }
     }
 

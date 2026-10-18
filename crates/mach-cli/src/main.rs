@@ -510,16 +510,12 @@ async fn main() -> Result<()> {
             }
         },
         Commands::Docker { action } => match action {
-            DockerAction::Enable { system } => {
-                commands::docker::enable(system).await?;
-            }
-            DockerAction::Start { system } | DockerAction::Setup { system } => {
+            DockerAction::Start { system }
+            | DockerAction::Enable { system }
+            | DockerAction::Setup { system } => {
                 commands::docker::start(system).await?;
             }
-            DockerAction::Disable => {
-                commands::docker::disable().await?;
-            }
-            DockerAction::Stop => {
+            DockerAction::Stop | DockerAction::Disable => {
                 commands::docker::stop().await?;
             }
             DockerAction::Restart => {
@@ -548,17 +544,11 @@ async fn main() -> Result<()> {
             commands::mount::run_code(&machine, path.as_deref()).await?;
         }
         Commands::K8s { action } => match action {
-            K8sAction::Enable => {
+            K8sAction::Enable | K8sAction::Start => {
                 commands::k8s::enable().await?;
             }
-            K8sAction::Disable => {
+            K8sAction::Disable | K8sAction::Stop => {
                 commands::k8s::disable().await?;
-            }
-            K8sAction::Start => {
-                commands::k8s::start().await?;
-            }
-            K8sAction::Stop => {
-                commands::k8s::stop().await?;
             }
             K8sAction::Restart => {
                 commands::k8s::restart().await?;

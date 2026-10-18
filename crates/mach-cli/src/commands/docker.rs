@@ -445,7 +445,7 @@ pub async fn setup(system: bool) -> Result<()> {
         let sys_sock = Path::new("/var/run/docker.sock");
         if !sys_sock.exists() {
             println!("\n\x1b[1;33mTip:\x1b[0m For IDE plugins and legacy tools (VS Code Dev Containers, Testcontainers):");
-            println!("  \x1b[1;32mmachctl docker enable --system\x1b[0m");
+            println!("  \x1b[1;32mmachctl docker start --system\x1b[0m");
         }
     }
 
@@ -467,12 +467,14 @@ pub async fn start(system: bool) -> Result<()> {
     setup(system).await
 }
 
-/// Enable Docker engine and configure CLI context
+/// Enable Docker engine and configure CLI context (legacy alias for start)
+#[allow(dead_code)]
 pub async fn enable(system: bool) -> Result<()> {
     start(system).await
 }
 
-/// Disable Docker engine
+/// Disable Docker engine (legacy alias for stop)
+#[allow(dead_code)]
 pub async fn disable() -> Result<()> {
     stop().await
 }

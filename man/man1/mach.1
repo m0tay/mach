@@ -1,4 +1,4 @@
-.TH MACH 1 "October 2026" "Mach 0.13.0" "Mach Manual"
+.TH MACH 1 "October 2026" "Mach 0.14.0" "Mach Manual"
 .SH NAME
 mach \- supersonic, lightweight Linux virtualization and command runner for macOS Apple Silicon
 .SH SYNOPSIS
@@ -46,9 +46,9 @@ Any \fBmachctl\fR administration subcommand can be invoked directly through \fBm
 .RS
 .nf
 $ mach start debian
-$ mach top
-$ mach docker setup
-$ mach k8s enable
+$ machctl top
+$ machctl docker start
+$ machctl k8s enable
 .fi
 .RE
 

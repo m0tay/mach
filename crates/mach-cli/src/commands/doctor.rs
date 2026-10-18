@@ -193,7 +193,7 @@ pub async fn run() -> Result<()> {
         if stdout.contains("mach") {
             println!("  \x1b[1;32m✓\x1b[0m Docker Context:      'mach' context configured in Docker CLI");
         } else {
-            println!("  \x1b[1;33m!\x1b[0m Docker Context:      'mach' context not configured (run `machctl docker enable`)");
+            println!("  \x1b[1;33m!\x1b[0m Docker Context:      'mach' context not configured (run `machctl docker start`)");
         }
     }
 

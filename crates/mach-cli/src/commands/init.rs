@@ -95,7 +95,7 @@ pub async fn run(non_interactive: bool) -> Result<()> {
         let _ = Command::new(bin).args(["context", "use", "mach"]).output();
         println!("  \x1b[1;32m✓\x1b[0m Docker CLI context 'mach' configured (unix://{})", sock_path.display());
     } else {
-        println!("  - Docker CLI not detected on macOS (run 'machctl docker enable' when installed)");
+        println!("  - Docker CLI not detected on macOS (run 'machctl docker start' when installed)");
     }
 
     // 6. Local wildcard TLS CA (*.mach.local)

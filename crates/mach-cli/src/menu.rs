@@ -1025,14 +1025,6 @@ mod imp {
                 Some(target),
                 !is_starting_docker,
             );
-            let logs_sel = sel_registerName(b"onOpenDockerLogs:\0".as_ptr() as _);
-            add_menu_item(
-                sub,
-                "View Logs",
-                Some(logs_sel),
-                Some(target),
-                true,
-            );
             attach_submenu(parent_item, sub);
         } else {
             let parent_item = add_menu_item(menu, "  ● Docker Engine", None, None, true);
@@ -1243,18 +1235,10 @@ mod imp {
             let start_k8s_sel = sel_registerName(b"onStartK8s:\0".as_ptr() as _);
             add_menu_item(
                 sub,
-                "Start Kubernetes",
+                "Enable Kubernetes",
                 Some(start_k8s_sel),
                 Some(target),
                 !is_starting_k8s,
-            );
-            let logs_sel = sel_registerName(b"onOpenK8sClusterLogs:\0".as_ptr() as _);
-            add_menu_item(
-                sub,
-                "View Cluster Logs",
-                Some(logs_sel),
-                Some(target),
-                true,
             );
             attach_submenu(parent_item, sub);
         } else {
@@ -1265,7 +1249,7 @@ mod imp {
             let restart_sel = sel_registerName(b"onRestartK8s:\0".as_ptr() as _);
             add_menu_item(sub, "Restart", Some(restart_sel), Some(target), !is_starting_k8s);
             let stop_sel = sel_registerName(b"onStopK8s:\0".as_ptr() as _);
-            add_menu_item(sub, "Stop", Some(stop_sel), Some(target), !is_starting_k8s);
+            add_menu_item(sub, "Disable", Some(stop_sel), Some(target), !is_starting_k8s);
             attach_submenu(parent_item, sub);
 
             if snapshot.k8s_services.is_empty() && snapshot.k8s_pods.is_empty() {
@@ -1810,29 +1794,29 @@ end tell"#,
     }
 
     extern "C" fn on_start_k8s(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
-        set_active_op("Starting Kubernetes");
+        set_active_op("Enabling Kubernetes");
         std::thread::spawn(|| {
             let machctl_bin = resolve_machctl_bin();
             let st = std::process::Command::new(machctl_bin)
-                .args(["k8s", "start"])
+                .args(["k8s", "enable"])
                 .status();
             if st.map(|s| s.success()).unwrap_or(false) {
                 send_macos_notification("Mach", "Kubernetes", "K3s cluster is active and ready for kubectl.");
             } else {
-                send_macos_notification("Mach", "Kubernetes", "Failed to start Kubernetes cluster. Check 'machctl k8s logs'.");
+                send_macos_notification("Mach", "Kubernetes", "Failed to enable Kubernetes cluster. Check 'machctl k8s logs'.");
             }
             clear_active_op();
         });
     }
 
     extern "C" fn on_stop_k8s(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
-        set_active_op("Stopping Kubernetes");
+        set_active_op("Disabling Kubernetes");
         std::thread::spawn(|| {
             let machctl_bin = resolve_machctl_bin();
             let _ = std::process::Command::new(machctl_bin)
-                .args(["k8s", "stop"])
+                .args(["k8s", "disable"])
                 .status();
-            send_macos_notification("Mach", "Kubernetes", "Kubernetes cluster stopped.");
+            send_macos_notification("Mach", "Kubernetes", "Kubernetes cluster disabled.");
             clear_active_op();
         });
     }

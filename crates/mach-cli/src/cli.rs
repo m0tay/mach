@@ -498,14 +498,6 @@ pub enum ConfigAction {
 /// Subcommands for `mach docker`.
 #[derive(Subcommand, Debug)]
 pub enum DockerAction {
-    /// Enable and start Docker engine and configure CLI context
-    Enable {
-        /// Also symlink /var/run/docker.sock for legacy tools & IDEs
-        #[arg(long)]
-        system: bool,
-    },
-    /// Disable and stop Docker engine
-    Disable,
     /// Start Docker engine and configure CLI context
     Start {
         /// Also symlink /var/run/docker.sock for legacy tools & IDEs
@@ -516,16 +508,8 @@ pub enum DockerAction {
     Stop,
     /// Restart Docker engine
     Restart,
-    /// Open an interactive shell inside the Docker infrastructure machine
-    Shell,
     /// Show Docker integration status
     Status,
-    /// Destroy Docker infrastructure machine and its volumes
-    Destroy {
-        /// Skip confirmation prompt
-        #[arg(short, long)]
-        force: bool,
-    },
     /// View Docker daemon system logs
     Logs {
         /// Follow log output
@@ -536,6 +520,24 @@ pub enum DockerAction {
         #[arg(short = 'n', long, default_value = "50")]
         lines: usize,
     },
+    /// Open an interactive shell inside the Docker infrastructure machine
+    Shell,
+    /// Destroy Docker infrastructure machine and its volumes
+    Destroy {
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        force: bool,
+    },
+    /// Enable and start Docker engine (legacy alias for start)
+    #[command(hide = true)]
+    Enable {
+        /// Also symlink /var/run/docker.sock for legacy tools & IDEs
+        #[arg(long)]
+        system: bool,
+    },
+    /// Disable and stop Docker engine (legacy alias for stop)
+    #[command(hide = true)]
+    Disable,
     /// Configure and ensure macOS docker context is connected to Mach (legacy)
     #[command(hide = true)]
     Setup {
@@ -548,18 +550,12 @@ pub enum DockerAction {
 /// Subcommands for `mach k8s`.
 #[derive(Subcommand, Debug)]
 pub enum K8sAction {
-    /// Enable and start local Kubernetes cluster
+    /// Enable and start local Kubernetes (K3s) cluster
     Enable,
-    /// Stop local Kubernetes cluster
+    /// Disable local Kubernetes cluster
     Disable,
-    /// Start local Kubernetes cluster node
-    Start,
-    /// Stop local Kubernetes cluster node
-    Stop,
-    /// Restart local Kubernetes cluster node
+    /// Restart local Kubernetes cluster
     Restart,
-    /// Open an interactive shell inside the Kubernetes infrastructure machine
-    Shell,
     /// Show Kubernetes cluster status
     Status,
     /// View Kubernetes (K3s) daemon system logs
@@ -572,6 +568,14 @@ pub enum K8sAction {
         #[arg(short = 'n', long, default_value = "50")]
         lines: usize,
     },
+    /// Open an interactive shell inside the Kubernetes infrastructure machine
+    Shell,
+    /// Start local Kubernetes cluster node (legacy alias for enable)
+    #[command(hide = true)]
+    Start,
+    /// Stop local Kubernetes cluster node (legacy alias for disable)
+    #[command(hide = true)]
+    Stop,
 }
 
 /// Subcommands for `mach daemon`.
