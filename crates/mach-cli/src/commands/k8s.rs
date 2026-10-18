@@ -147,9 +147,10 @@ pub async fn enable() -> Result<()> {
 
     println!("  \x1b[1;36m➜\x1b[0m Configuring Docker runtime and K3s inside {}...", vm_name);
 
-    // 3. Configure Docker and K3s with --docker integration
-    let k3s_setup_script = r#"which dockerd >/dev/null || (apt-get update -y >/dev/null 2>&1 && apt-get install -y docker.io containerd >/dev/null 2>&1);
-systemctl enable --now docker >/dev/null 2>&1;
+    // 3. Configure Docker runtime using fast installer
+    crate::commands::docker::ensure_docker_installed(ip, &vm_name).await?;
+
+    let k3s_setup_script = r#"systemctl enable --now docker >/dev/null 2>&1;
 mkdir -p /etc/rancher/k3s;
 cat << 'EOF' > /etc/rancher/k3s/config.yaml
 docker: true

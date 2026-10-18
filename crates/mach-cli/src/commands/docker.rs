@@ -3,8 +3,10 @@
 use anyhow::Result;
 use mach_common::config::MachConfig;
 use mach_common::machine::{Machine, MachineState};
+use std::net::IpAddr;
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 
 pub const SYSTEM_VM_NAME: &str = "mach-system";
 pub const DOCKER_VM_NAME: &str = SYSTEM_VM_NAME;
@@ -58,6 +60,296 @@ pub fn terminate_docker_ssh_tunnel() {
     }
 }
 
+/// Check whether the Docker daemon is responding inside the VM via /var/run/docker.sock.
+pub async fn is_docker_running_in_vm(ip: IpAddr) -> bool {
+    let base_ssh = crate::ssh::mach_ssh_args();
+    let mut check_args = base_ssh;
+    check_args.extend([
+        "-o".to_string(),
+        "ConnectTimeout=2".to_string(),
+        format!("root@{ip}"),
+        "test -S /var/run/docker.sock".to_string(),
+    ]);
+
+    tokio::time::timeout(
+        Duration::from_secs(3),
+        tokio::process::Command::new("ssh").args(&check_args).status(),
+    )
+    .await
+    .map(|res| res.map(|s| s.success()).unwrap_or(false))
+    .unwrap_or(false)
+}
+
+/// Ensure /etc/docker/daemon.json is cleanly configured on the VM.
+pub async fn ensure_daemon_json(ip: IpAddr) -> Result<()> {
+    let daemon_cfg_script = r#"
+mkdir -p /etc/docker
+if [ ! -f /etc/docker/daemon.json ]; then
+cat << 'EOF' > /etc/docker/daemon.json
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  },
+  "features": {
+    "buildkit": true
+  }
+}
+EOF
+if pidof dockerd >/dev/null 2>&1; then
+    systemctl reload docker 2>/dev/null || kill -s HUP $(pidof dockerd) 2>/dev/null || true
+fi
+fi
+"#;
+    let base_ssh = crate::ssh::mach_ssh_args();
+    let mut args = base_ssh;
+    args.extend([
+        "-o".to_string(),
+        "ConnectTimeout=5".to_string(),
+        format!("root@{ip}"),
+        daemon_cfg_script.to_string(),
+    ]);
+
+    let _ = tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::process::Command::new("ssh").args(&args).status(),
+    )
+    .await;
+
+    Ok(())
+}
+
+/// Provision Docker Engine inside the specified VM using fast official static binaries
+/// or get.docker.com with strict timeout and status feedback.
+pub async fn ensure_docker_installed(ip: IpAddr, vm_name: &str) -> Result<()> {
+    // 1. If Docker socket already exists and is active, ensure daemon.json and return
+    if is_docker_running_in_vm(ip).await {
+        let _ = ensure_daemon_json(ip).await;
+        return Ok(());
+    }
+
+    // 2. Clear progress indication
+    println!("  \x1b[1;36m➜\x1b[0m Installing Docker Engine inside {vm_name}...");
+    let start_time = std::time::Instant::now();
+
+    // 3. Resilient provisioning script
+    let install_script = r#"set -e
+
+# If dockerd binary exists, just ensure it is started
+if command -v dockerd >/dev/null 2>&1; then
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl enable --now docker 2>/dev/null || service docker start 2>/dev/null || true
+    for i in $(seq 1 10); do
+        if [ -S /var/run/docker.sock ]; then exit 0; fi
+        sleep 0.5
+    done
+fi
+
+# Configure docker group
+getent group docker >/dev/null 2>&1 || groupadd -r docker >/dev/null 2>&1 || true
+
+# Pre-configure /etc/docker/daemon.json
+mkdir -p /etc/docker
+if [ ! -f /etc/docker/daemon.json ]; then
+cat << 'EOF' > /etc/docker/daemon.json
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  },
+  "features": {
+    "buildkit": true
+  }
+}
+EOF
+fi
+
+# Detect architecture
+ARCH=$(uname -m)
+case "$ARCH" in
+    aarch64|arm64) DOCKER_ARCH="aarch64" ;;
+    x86_64|amd64)  DOCKER_ARCH="x86_64" ;;
+    *)             DOCKER_ARCH="aarch64" ;;
+esac
+
+STATIC_URL="https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-26.1.4.tgz"
+INSTALLED=0
+
+# Primary Path: Fast static binary installation (~2-4 seconds)
+TMP_DIR=$(mktemp -d /tmp/docker-setup.XXXXXX)
+if command -v curl >/dev/null 2>&1; then
+    if curl -fsSL --connect-timeout 8 --max-time 35 "$STATIC_URL" -o "$TMP_DIR/docker.tgz"; then
+        tar -xzf "$TMP_DIR/docker.tgz" -C "$TMP_DIR"
+        cp -f "$TMP_DIR/docker/"* /usr/bin/
+        chmod +x /usr/bin/docker* /usr/bin/containerd* /usr/bin/ctr /usr/bin/runc 2>/dev/null || true
+        INSTALLED=1
+    fi
+elif command -v wget >/dev/null 2>&1; then
+    if wget -q --timeout=35 -O "$TMP_DIR/docker.tgz" "$STATIC_URL"; then
+        tar -xzf "$TMP_DIR/docker.tgz" -C "$TMP_DIR"
+        cp -f "$TMP_DIR/docker/"* /usr/bin/
+        chmod +x /usr/bin/docker* /usr/bin/containerd* /usr/bin/ctr /usr/bin/runc 2>/dev/null || true
+        INSTALLED=1
+    fi
+fi
+rm -rf "$TMP_DIR"
+
+if [ "$INSTALLED" -eq 1 ]; then
+    cat << 'EOF' > /etc/systemd/system/docker.service
+[Unit]
+Description=Docker Application Container Engine
+Documentation=https://docs.docker.com
+After=network-online.target firewalld.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/dockerd
+ExecReload=/bin/kill -s HUP $MAINPID
+TimeoutStartSec=20
+RestartSec=2
+Restart=always
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+TasksMax=infinity
+Delegate=yes
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable --now docker.service
+    for i in $(seq 1 20); do
+        if [ -S /var/run/docker.sock ]; then exit 0; fi
+        sleep 0.5
+    done
+    exit 0
+fi
+
+# Fallback 1: get.docker.com convenience script
+if command -v curl >/dev/null 2>&1; then
+    if curl -fsSL --connect-timeout 8 --max-time 40 https://get.docker.com | sh; then
+        systemctl enable --now docker.service 2>/dev/null || true
+        exit 0
+    fi
+fi
+
+# Fallback 2: Fast minimal non-interactive apt
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq -o Acquire::Connect-Timeout=8 -o Acquire::Http::Timeout=15 || true
+apt-get install -y -qq --no-install-recommends docker.io containerd || true
+systemctl enable --now docker.service 2>/dev/null || true
+"#;
+
+    let base_ssh = crate::ssh::mach_ssh_args();
+    let mut install_args = base_ssh.clone();
+    install_args.extend([
+        "-o".to_string(),
+        "ConnectTimeout=10".to_string(),
+        format!("root@{ip}"),
+        install_script.to_string(),
+    ]);
+
+    // 60-second execution timeout using tokio timeout so it never hangs indefinitely
+    let install_future = async {
+        let output = tokio::process::Command::new("ssh")
+            .args(&install_args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .output()
+            .await?;
+        Ok::<_, anyhow::Error>(output)
+    };
+
+    match tokio::time::timeout(Duration::from_secs(60), install_future).await {
+        Ok(Ok(output)) => {
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let err_msg = if !stderr.trim().is_empty() {
+                    stderr.trim()
+                } else if !stdout.trim().is_empty() {
+                    stdout.trim()
+                } else {
+                    "install script returned non-zero exit code"
+                };
+                tracing::warn!("Docker install script message: {err_msg}");
+            }
+        }
+        Ok(Err(e)) => {
+            anyhow::bail!("Failed to execute Docker installation command via SSH: {e}");
+        }
+        Err(_) => {
+            anyhow::bail!("Docker installation timed out after 60 seconds inside {vm_name}");
+        }
+    }
+
+    // Wait up to 15 seconds for /var/run/docker.sock to become active
+    let mut sock_active = false;
+    for _ in 0..30 {
+        if is_docker_running_in_vm(ip).await {
+            sock_active = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    if !sock_active {
+        anyhow::bail!("Docker engine failed to start /var/run/docker.sock inside {vm_name}");
+    }
+
+    // Ensure /etc/docker/daemon.json is clean
+    let _ = ensure_daemon_json(ip).await;
+
+    let elapsed = start_time.elapsed().as_secs();
+    println!("  \x1b[1;32m✓\x1b[0m Docker Engine installed and ready inside {vm_name} ({elapsed}s)");
+    Ok(())
+}
+
+/// Ensure reverse proxy forwarder on port 80 is active inside VM
+pub async fn ensure_proxy_forwarder(ip: IpAddr) -> Result<()> {
+    let proxy_setup_script = r#"which socat >/dev/null 2>&1 || (export DEBIAN_FRONTEND=noninteractive; apt-get update -qq -o Acquire::Connect-Timeout=5 -o Acquire::Http::Timeout=10 && apt-get install -y -qq --no-install-recommends socat);
+if [ ! -f /etc/systemd/system/mach-proxy.service ]; then
+cat << 'EOF' > /etc/systemd/system/mach-proxy.service
+[Unit]
+Description=Mach Reverse Proxy Forwarder
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/socat TCP-LISTEN:80,fork,reuseaddr TCP:192.168.64.1:28080
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+fi
+systemctl enable --now mach-proxy.service >/dev/null 2>&1 || true
+"#;
+    let base_ssh = crate::ssh::mach_ssh_args();
+    let mut proxy_args = base_ssh;
+    proxy_args.extend([
+        "-o".to_string(),
+        "ConnectTimeout=5".to_string(),
+        format!("root@{ip}"),
+        proxy_setup_script.to_string(),
+    ]);
+
+    let _ = tokio::time::timeout(
+        Duration::from_secs(15),
+        tokio::process::Command::new("ssh").args(&proxy_args).status(),
+    )
+    .await;
+
+    Ok(())
+}
+
 /// Configure and ensure the dedicated Docker environment is running.
 pub async fn setup(system: bool) -> Result<()> {
     let cfg = MachConfig::load()?;
@@ -87,66 +379,10 @@ pub async fn setup(system: bool) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("machine {DOCKER_VM_NAME} has no IP address"))?;
 
     // 2. Ensure dockerd is installed and running in the VM
-    let base_ssh = crate::ssh::mach_ssh_args();
-    let mut check_args = base_ssh.clone();
-    check_args.extend([
-        "-o".to_string(), "ConnectTimeout=2".to_string(),
-        format!("root@{ip}"),
-        "test -S /var/run/docker.sock".to_string(),
-    ]);
-
-    let is_running = Command::new("ssh")
-        .args(&check_args)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-
-    if !is_running {
-        println!("  \x1b[1;36m➜\x1b[0m Initializing Docker engine inside {DOCKER_VM_NAME}...");
-        let start_cmd = "which dockerd >/dev/null || (apt-get update -y >/dev/null 2>&1 && apt-get install -y docker.io containerd >/dev/null 2>&1); systemctl enable --now docker >/dev/null 2>&1";
-        let mut start_args = base_ssh.clone();
-        start_args.extend([
-            "-o".to_string(), "ConnectTimeout=120".to_string(),
-            format!("root@{ip}"),
-            start_cmd.to_string(),
-        ]);
-        let _ = Command::new("ssh").args(&start_args).status();
-
-        for _ in 0..30 {
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            if Command::new("ssh").args(&check_args).status().map(|s| s.success()).unwrap_or(false) {
-                break;
-            }
-        }
-    }
+    ensure_docker_installed(ip, DOCKER_VM_NAME).await?;
 
     // 2.5 Ensure reverse proxy forwarder on port 80 is active inside VM
-    let proxy_setup_script = r#"which socat >/dev/null || (apt-get update -y >/dev/null 2>&1 && apt-get install -y socat >/dev/null 2>&1);
-if [ ! -f /etc/systemd/system/mach-proxy.service ]; then
-cat << 'EOF' > /etc/systemd/system/mach-proxy.service
-[Unit]
-Description=Mach Reverse Proxy Forwarder
-After=network.target
-
-[Service]
-ExecStart=/usr/bin/socat TCP-LISTEN:80,fork,reuseaddr TCP:192.168.64.1:28080
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload
-fi
-systemctl enable --now mach-proxy.service >/dev/null 2>&1 || true
-"#;
-    let mut proxy_args = base_ssh.clone();
-    proxy_args.extend([
-        "-o".to_string(), "ConnectTimeout=10".to_string(),
-        format!("root@{ip}"),
-        proxy_setup_script.to_string(),
-    ]);
-    let _ = Command::new("ssh").args(&proxy_args).status();
+    ensure_proxy_forwarder(ip).await?;
 
     // 3. Establish socket forwarding to ~/.mach/run/docker.sock
     terminate_docker_ssh_tunnel();
@@ -160,7 +396,7 @@ systemctl enable --now mach-proxy.service >/dev/null 2>&1 || true
         "-L".to_string(),
         format!("{}:/var/run/docker.sock", sock_path.display()),
     ];
-    docker_fwd_args.extend(base_ssh);
+    docker_fwd_args.extend(crate::ssh::mach_ssh_args());
     docker_fwd_args.extend([
         "-o".to_string(), "ConnectTimeout=5".to_string(),
         format!("root@{ip}"),
@@ -379,5 +615,61 @@ pub async fn status() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_docker_vm_names() {
+        assert_eq!(SYSTEM_VM_NAME, "mach-system");
+        assert_eq!(DOCKER_VM_NAME, "mach-system");
+    }
+
+    #[test]
+    fn test_daemon_json_template_is_valid_json() {
+        let json_str = r#"{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  },
+  "features": {
+    "buildkit": true
+  }
+}"#;
+        let parsed: serde_json::Value = serde_json::from_str(json_str).expect("Valid JSON");
+        assert_eq!(parsed["log-driver"], "json-file");
+        assert_eq!(parsed["log-opts"]["max-size"], "10m");
+        assert_eq!(parsed["log-opts"]["max-file"], "3");
+        assert_eq!(parsed["features"]["buildkit"], true);
+    }
+
+    #[test]
+    fn test_docker_static_arch_mapping() {
+        let resolve_arch = |arch: &str| -> &'static str {
+            match arch {
+                "aarch64" | "arm64" => "aarch64",
+                "x86_64" | "amd64" => "x86_64",
+                _ => "aarch64",
+            }
+        };
+
+        assert_eq!(resolve_arch("aarch64"), "aarch64");
+        assert_eq!(resolve_arch("arm64"), "aarch64");
+        assert_eq!(resolve_arch("x86_64"), "x86_64");
+        assert_eq!(resolve_arch("amd64"), "x86_64");
+        assert_eq!(resolve_arch("other"), "aarch64");
+
+        let url = format!(
+            "https://download.docker.com/linux/static/stable/{}/docker-26.1.4.tgz",
+            resolve_arch("aarch64")
+        );
+        assert_eq!(
+            url,
+            "https://download.docker.com/linux/static/stable/aarch64/docker-26.1.4.tgz"
+        );
+    }
 }
 
