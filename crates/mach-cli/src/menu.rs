@@ -970,10 +970,12 @@ mod imp {
                 let sub = create_submenu(&c.name);
 
                 if is_up {
+                    let open_url_sel = sel_registerName(b"onOpenUrl:\0".as_ptr() as _);
+                    let copy_sel = sel_registerName(b"onCopyText:\0".as_ptr() as _);
+                    let domain_url = format!("http://{}", c.domain);
+
                     if let Some(pub_p) = c.public_port {
-                        let open_url_sel = sel_registerName(b"onOpenUrl:\0".as_ptr() as _);
-                        let copy_sel = sel_registerName(b"onCopyText:\0".as_ptr() as _);
-                        let url = format!("http://localhost:{}", pub_p);
+                        let port_url = format!("http://localhost:{}", pub_p);
 
                         add_menu_item_with_obj(
                             sub,
@@ -981,15 +983,49 @@ mod imp {
                             Some(open_url_sel),
                             Some(target),
                             true,
-                            Some(&url),
+                            Some(&port_url),
                         );
                         add_menu_item_with_obj(
                             sub,
-                            "Copy URL",
+                            &format!("Open {}", c.domain),
+                            Some(open_url_sel),
+                            Some(target),
+                            true,
+                            Some(&domain_url),
+                        );
+                        add_menu_item_with_obj(
+                            sub,
+                            &format!("Copy URL (: {})", pub_p).replace(" ", ""),
                             Some(copy_sel),
                             Some(target),
                             true,
-                            Some(&url),
+                            Some(&port_url),
+                        );
+                        add_menu_item_with_obj(
+                            sub,
+                            &format!("Copy URL ({})", c.domain),
+                            Some(copy_sel),
+                            Some(target),
+                            true,
+                            Some(&domain_url),
+                        );
+                        add_separator(sub);
+                    } else {
+                        add_menu_item_with_obj(
+                            sub,
+                            &format!("Open {}", c.domain),
+                            Some(open_url_sel),
+                            Some(target),
+                            true,
+                            Some(&domain_url),
+                        );
+                        add_menu_item_with_obj(
+                            sub,
+                            &format!("Copy URL ({})", c.domain),
+                            Some(copy_sel),
+                            Some(target),
+                            true,
+                            Some(&domain_url),
                         );
                         add_separator(sub);
                     }
@@ -1244,9 +1280,10 @@ mod imp {
 
         add_separator(menu);
 
-        let quit_title = format!("Quit (v{})", env!("CARGO_PKG_VERSION"));
+        let ver_title = format!("mach v{}", env!("CARGO_PKG_VERSION"));
+        add_menu_item(menu, &ver_title, None, None, false);
         let quit_sel = sel_registerName(b"onQuit:\0".as_ptr() as _);
-        add_menu_item(menu, &quit_title, Some(quit_sel), Some(target), true);
+        add_menu_item(menu, "Quit Mach", Some(quit_sel), Some(target), true);
     }
 
     extern "C" fn menu_needs_update(this: *mut c_void, _cmd: *mut c_void, menu: *mut c_void) {
@@ -1549,11 +1586,20 @@ end tell"#,
         }
     }
 
+    fn resolve_machctl_bin() -> String {
+        if let Ok(exe_path) = std::env::current_exe() {
+            let sibling = exe_path.with_file_name("machctl");
+            if sibling.exists() {
+                return sibling.to_string_lossy().into_owned();
+            }
+        }
+        "machctl".to_string()
+    }
+
     extern "C" fn on_start_docker(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
         std::thread::spawn(|| {
-            let exe = std::env::current_exe()
-                .unwrap_or_else(|_| std::path::PathBuf::from("machctl"));
-            let _ = std::process::Command::new(exe)
+            let machctl_bin = resolve_machctl_bin();
+            let _ = std::process::Command::new(machctl_bin)
                 .args(["docker", "start"])
                 .status();
         });
@@ -1561,9 +1607,10 @@ end tell"#,
 
     extern "C" fn on_start_k8s(_this: *mut c_void, _cmd: *mut c_void, _sender: *mut c_void) {
         std::thread::spawn(|| {
-            let exe = std::env::current_exe()
-                .unwrap_or_else(|_| std::path::PathBuf::from("machctl"));
-            let _ = std::process::Command::new(exe).args(["k8s", "start"]).status();
+            let machctl_bin = resolve_machctl_bin();
+            let _ = std::process::Command::new(machctl_bin)
+                .args(["k8s", "start"])
+                .status();
         });
     }
 
@@ -1690,15 +1737,13 @@ end tell"#,
         _cmd: *mut c_void,
         _sender: *mut c_void,
     ) {
-        let exe = std::env::current_exe()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| "machctl".to_string());
+        let machctl_bin = resolve_machctl_bin();
         let script = format!(
             r#"tell application "Terminal"
     do script "{} top"
     activate
 end tell"#,
-            exe
+            machctl_bin
         );
         let _ = std::process::Command::new("osascript")
             .arg("-e")
