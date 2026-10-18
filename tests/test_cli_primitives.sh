@@ -40,7 +40,8 @@ echo -e "${BLUE}======================================================${NC}\n"
 echo -e "${YELLOW}[1/15] Testing version and help output...${NC}"
 VER_OUT=$(mach version)
 assert_contains "$VER_OUT" "mach" "mach version returns valid header"
-assert_contains "$VER_OUT" "0.6.0" "mach version returns semantic version"
+CARGO_VER=$(grep '^version = ' "$SCRIPT_DIR/../Cargo.toml" | head -n 1 | cut -d '"' -f 2)
+assert_contains "$VER_OUT" "$CARGO_VER" "mach version returns semantic version"
 
 HELP_OUT=$(machctl --help)
 assert_contains "$HELP_OUT" "Linux machines:" "machctl --help lists Linux machines group"
