@@ -36,7 +36,7 @@ pub async fn run_port_forwarder(docker_sock: &Path, machines_dir: &Path) -> Resu
 
         let guest_ip = machines
             .iter()
-            .find(|m| m.config.name == "mach-docker" && m.state == mach_common::machine::MachineState::Running && m.ip_address.is_some())
+            .find(|m| (m.config.name == "mach-system" || m.config.name == "mach-docker") && m.state == mach_common::machine::MachineState::Running && m.ip_address.is_some())
             .or_else(|| machines.iter().find(|m| m.ip_address.is_some() && m.state == mach_common::machine::MachineState::Running))
             .and_then(|m| m.ip_address);
 

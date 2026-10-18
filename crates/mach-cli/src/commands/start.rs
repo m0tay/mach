@@ -235,7 +235,7 @@ pub async fn run_ext(name: Option<&str>, to_stderr: bool) -> Result<()> {
     let mut machine = find_machine(&cfg.machines_dir, &target_name)?
         .with_context(|| format!("machine '{target_name}' not found"))?;
 
-    if machine.config.name == "mach-docker" {
+    if machine.config.name == "mach-system" || machine.config.name == "mach-docker" {
         let target_mem = cfg.system_memory_mib();
         if machine.config.memory_mb != target_mem {
             machine.config.memory_mb = target_mem;

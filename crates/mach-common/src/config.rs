@@ -206,7 +206,7 @@ pub struct MachConfig {
     pub default_memory_mb: u64,
 
     /// Memory in mebibytes (MiB) assigned to the unified system infrastructure machine
-    /// hosting Docker Engine and Kubernetes (mach-docker).
+    /// hosting Docker Engine and Kubernetes (mach-system).
     ///
     /// Default: `4096` (4 GiB)
     #[serde(default = "default_system_memory_val", alias = "system_memory_mb", alias = "docker_memory_mb", alias = "k8s_memory_mb")]

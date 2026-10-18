@@ -258,6 +258,7 @@ mod imp {
 
     fn is_system_machine(m: &mach_common::machine::Machine) -> bool {
         m.is_system()
+            || m.config.name == "mach-system"
             || m.config.name == "mach-docker"
             || m.config.name == "mach-kubernetes"
             || m.config.name == "mach-k8s"
@@ -310,7 +311,7 @@ mod imp {
         all_machines: &[mach_common::machine::Machine],
         cfg: Option<&MachConfig>,
     ) -> &'static str {
-        let docker_vm = all_machines.iter().find(|m| m.config.name == "mach-docker");
+        let docker_vm = all_machines.iter().find(|m| m.config.name == "mach-system" || m.config.name == "mach-docker");
         match docker_vm {
             None => "Docker: Not installed",
             Some(m) => match &m.state {
@@ -333,7 +334,8 @@ mod imp {
             return "Kubernetes: Ready";
         }
         let infra_vm = all_machines.iter().find(|m| {
-            m.config.name == "mach-docker"
+            m.config.name == "mach-system"
+                || m.config.name == "mach-docker"
                 || m.config.name == "mach-kubernetes"
                 || m.config.name == "mach-k8s"
         });

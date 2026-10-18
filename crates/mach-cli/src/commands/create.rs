@@ -123,7 +123,8 @@ pub async fn run_ext(
         out_ln!("  Isolated:     \x1b[33mtrue (host file sharing disabled)\x1b[0m");
     }
 
-    let is_sys = machine_name == "mach-docker"
+    let is_sys = machine_name == "mach-system"
+        || machine_name == "mach-docker"
         || machine_name == "mach-k8s"
         || machine_name == "mach-kubernetes";
 

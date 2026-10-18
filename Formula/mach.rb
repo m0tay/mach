@@ -2,7 +2,7 @@ class Mach < Formula
   desc "Supersonic Linux virtualization & container engine for Apple Silicon"
   homepage "https://github.com/douglaslobo/mach"
   url "file:///Users/douglaslobo/Developer/mach/dist/mach-0.6.0-aarch64-apple-darwin.tar.gz"
-  sha256 "06e60de53dcf08d7d6a394114ecb4b2aac05a60f933f225f94e97c760a107411"
+  sha256 "565507d12f3408ff69b6f004792db4b203d6b979479cdd4b9218aade4eb86355"
   license "MIT"
 
   depends_on arch: :arm64

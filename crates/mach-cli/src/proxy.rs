@@ -245,7 +245,7 @@ async fn handle_proxy_conn(mut client: TcpStream, docker_sock: &Path, machines_d
     let machines = load_all_machines(machines_dir).unwrap_or_default();
     let guest_ip = machines
         .iter()
-        .find(|m| m.config.name == "mach-docker" && m.state == mach_common::machine::MachineState::Running && m.ip_address.is_some())
+        .find(|m| (m.config.name == "mach-system" || m.config.name == "mach-docker") && m.state == mach_common::machine::MachineState::Running && m.ip_address.is_some())
         .or_else(|| machines.iter().find(|m| m.ip_address.is_some() && m.state == mach_common::machine::MachineState::Running))
         .and_then(|m| m.ip_address);
 

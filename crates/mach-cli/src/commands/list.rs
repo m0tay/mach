@@ -109,7 +109,7 @@ pub async fn run(all: bool, show_system: bool) -> Result<()> {
                     format!("{} MiB", m.config.memory_mb)
                 };
 
-                let details = if m.config.name == "mach-docker" {
+                let details = if m.config.name == "mach-system" || m.config.name == "mach-docker" {
                     if cfg.k8s.was_running {
                         "Docker Engine & K8s Cluster"
                     } else {

@@ -60,7 +60,7 @@ pub enum Commands {
         #[arg(short, long)]
         all: bool,
 
-        /// Show protected system infrastructure machines (mach-docker, mach-kubernetes)
+        /// Show protected system infrastructure machines (mach-system)
         #[arg(long)]
         system: bool,
     },

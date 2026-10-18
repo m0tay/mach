@@ -207,14 +207,16 @@ pub fn handle_dns_query(packet: &[u8], machines_dir: &Path) -> Option<Vec<u8>> {
                 } else if let Some(ip) = lookup_machine_ip(machines_dir, label) {
                     Some(DnsRecord::A(ip))
                 } else {
-                    // Container or unmatched name -> mach-docker VM or fallback to reverse proxy
-                    let target_ip = lookup_machine_ip(machines_dir, "mach-docker")
+                    // Container or unmatched name -> mach-system VM or fallback to reverse proxy
+                    let target_ip = lookup_machine_ip(machines_dir, "mach-system")
+                        .or_else(|| lookup_machine_ip(machines_dir, "mach-docker"))
                         .unwrap_or(Ipv4Addr::new(127, 0, 0, 1));
                     Some(DnsRecord::A(target_ip))
                 }
             } else {
-                // Multi-level subdomain (e.g. web.app.mach.local) -> mach-docker VM or fallback to reverse proxy
-                let target_ip = lookup_machine_ip(machines_dir, "mach-docker")
+                // Multi-level subdomain (e.g. web.app.mach.local) -> mach-system VM or fallback to reverse proxy
+                let target_ip = lookup_machine_ip(machines_dir, "mach-system")
+                    .or_else(|| lookup_machine_ip(machines_dir, "mach-docker"))
                     .unwrap_or(Ipv4Addr::new(127, 0, 0, 1));
                 Some(DnsRecord::A(target_ip))
             }

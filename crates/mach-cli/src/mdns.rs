@@ -148,7 +148,7 @@ impl MdnsPublisher {
                             desired.insert("k8s.mach.local".to_string(), ("k8s".to_string(), ip));
                         }
 
-                        if m.config.name == "mach-docker" {
+                        if m.config.name == "mach-system" || m.config.name == "mach-docker" {
                             docker_ip = Some(ip);
                         } else if docker_ip.is_none() {
                             docker_ip = Some(ip);

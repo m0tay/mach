@@ -194,9 +194,10 @@ impl Machine {
     }
 
     /// Returns `true` if this is a protected Mach system infrastructure machine
-    /// (e.g. mach-docker, mach-k8s, or explicitly marked is_system).
+    /// (e.g. mach-system, mach-docker, mach-k8s, or explicitly marked is_system).
     pub fn is_system(&self) -> bool {
         self.config.is_system
+            || self.config.name == "mach-system"
             || self.config.name == "mach-docker"
             || self.config.name == "mach-k8s"
             || self.config.name == "mach-kubernetes"
@@ -204,7 +205,7 @@ impl Machine {
 
     /// Returns human-readable system service name if this is an infrastructure machine.
     pub fn system_service_name(&self) -> Option<&'static str> {
-        if self.config.name == "mach-docker" {
+        if self.config.name == "mach-system" || self.config.name == "mach-docker" {
             Some("Docker & K8s")
         } else if self.config.name == "mach-k8s" || self.config.name == "mach-kubernetes" {
             Some("Kubernetes")

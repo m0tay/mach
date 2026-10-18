@@ -103,11 +103,12 @@ pub async fn set(key: &str, value: &str) -> Result<()> {
 
     if applied_sys_memory {
         let mib = cfg.system_memory_mib();
-        if let Ok(Some(mut m)) = super::find_machine(&cfg.machines_dir, super::docker::DOCKER_VM_NAME) {
+        if let Ok(Some(mut m)) = super::docker::find_system_machine(&cfg.machines_dir) {
+            let vm_name = m.config.name.clone();
             m.config.memory_mb = mib;
             let _ = m.save(&cfg.machines_dir);
             if m.state == mach_common::machine::MachineState::Running {
-                println!("  \x1b[1;33mTip:\x1b[0m mach-docker is currently running. Run 'machctl docker restart' to apply the new memory allocation.");
+                println!("  \x1b[1;33mTip:\x1b[0m {vm_name} is currently running. Run 'machctl docker restart' to apply the new memory allocation.");
             }
         }
     }

@@ -6,12 +6,24 @@ use mach_common::machine::{Machine, MachineState};
 use std::path::Path;
 use std::process::Command;
 
-pub const DOCKER_VM_NAME: &str = "mach-docker";
+pub const SYSTEM_VM_NAME: &str = "mach-system";
+pub const DOCKER_VM_NAME: &str = SYSTEM_VM_NAME;
 
-/// Ensure the dedicated Docker infrastructure machine exists.
+/// Find active system infrastructure machine (prefers mach-system, falls back to legacy mach-docker).
+pub fn find_system_machine(machines_dir: &Path) -> Result<Option<Machine>> {
+    if let Some(m) = super::find_machine(machines_dir, SYSTEM_VM_NAME)? {
+        return Ok(Some(m));
+    }
+    if let Some(m) = super::find_machine(machines_dir, "mach-docker")? {
+        return Ok(Some(m));
+    }
+    Ok(None)
+}
+
+/// Ensure the dedicated system infrastructure machine exists.
 pub async fn ensure_docker_vm(cfg: &MachConfig) -> Result<Machine> {
     let target_mem = cfg.system_memory_mib();
-    if let Some(mut m) = super::find_machine(&cfg.machines_dir, DOCKER_VM_NAME)? {
+    if let Some(mut m) = find_system_machine(&cfg.machines_dir)? {
         if m.config.memory_mb != target_mem {
             m.config.memory_mb = target_mem;
             let _ = m.save(&cfg.machines_dir);
@@ -19,11 +31,11 @@ pub async fn ensure_docker_vm(cfg: &MachConfig) -> Result<Machine> {
         return Ok(m);
     }
 
-    println!("  \x1b[1;36m➜\x1b[0m Provisioning unified container infrastructure machine (\x1b[1m{}\x1b[0m, {} MiB RAM)...", DOCKER_VM_NAME, target_mem);
-    crate::commands::create::run_with_isolated("debian", Some(DOCKER_VM_NAME), 2, target_mem, 20, "aarch64", false).await?;
+    println!("  \x1b[1;36m➜\x1b[0m Provisioning unified system infrastructure machine (\x1b[1m{}\x1b[0m, {} MiB RAM)...", SYSTEM_VM_NAME, target_mem);
+    crate::commands::create::run_with_isolated("debian", Some(SYSTEM_VM_NAME), 2, target_mem, 20, "aarch64", false).await?;
 
-    let m = super::find_machine(&cfg.machines_dir, DOCKER_VM_NAME)?
-        .ok_or_else(|| anyhow::anyhow!("failed to create Docker infrastructure machine"))?;
+    let m = super::find_machine(&cfg.machines_dir, SYSTEM_VM_NAME)?
+        .ok_or_else(|| anyhow::anyhow!("failed to create system infrastructure machine"))?;
     Ok(m)
 }
 
@@ -230,9 +242,9 @@ pub async fn stop() -> Result<()> {
     let sock_path = cfg.data_dir.join("run").join("docker.sock");
     let _ = std::fs::remove_file(&sock_path);
 
-    if super::find_machine(&cfg.machines_dir, DOCKER_VM_NAME)?.is_some() {
-        crate::commands::stop::run(Some(DOCKER_VM_NAME), false, true).await?;
-        println!("\x1b[1;32m✓\x1b[0m Docker infrastructure machine stopped.");
+    if let Some(m) = find_system_machine(&cfg.machines_dir)? {
+        crate::commands::stop::run(Some(&m.config.name), false, true).await?;
+        println!("\x1b[1;32m✓\x1b[0m System infrastructure machine stopped.");
     } else {
         println!("Docker engine is not currently initialized.");
     }
@@ -245,32 +257,38 @@ pub async fn restart() -> Result<()> {
     start().await
 }
 
-/// Open an interactive shell inside the Docker infrastructure machine
+/// Open an interactive shell inside the system infrastructure machine
 pub async fn shell() -> Result<()> {
     let cfg = MachConfig::load()?;
-    if super::find_machine(&cfg.machines_dir, DOCKER_VM_NAME)?.is_none() {
-        setup(false).await?;
-    }
-    println!("\x1b[1;36m➜\x1b[0m Connecting to Docker infrastructure machine (\x1b[1m{}\x1b[0m)...", DOCKER_VM_NAME);
-    super::shell::run(Some(DOCKER_VM_NAME), true, &[]).await
+    let vm_name = match find_system_machine(&cfg.machines_dir)? {
+        Some(m) => m.config.name,
+        None => {
+            let _ = setup(false).await?;
+            SYSTEM_VM_NAME.to_string()
+        }
+    };
+    println!("\x1b[1;36m➜\x1b[0m Connecting to system infrastructure machine (\x1b[1m{}\x1b[0m)...", vm_name);
+    super::shell::run(Some(&vm_name), true, &[]).await
 }
 
-/// Destroy the Docker infrastructure machine and its container volumes
+/// Destroy the system infrastructure machine and its container volumes
 pub async fn destroy(force: bool) -> Result<()> {
     if let Ok(mut c) = MachConfig::load() {
         c.docker.was_running = false;
         let _ = c.save();
     }
     let cfg = MachConfig::load()?;
-    if super::find_machine(&cfg.machines_dir, DOCKER_VM_NAME)?.is_none() {
-        println!("Docker infrastructure machine does not exist.");
+    let sys_m = find_system_machine(&cfg.machines_dir)?;
+    if sys_m.is_none() {
+        println!("System infrastructure machine does not exist.");
         return Ok(());
     }
+    let vm_name = sys_m.unwrap().config.name;
 
-    println!("\x1b[1;33m⚠\x1b[0m Destroying Docker infrastructure machine ({DOCKER_VM_NAME}) and all stored container data...");
+    println!("\x1b[1;33m⚠\x1b[0m Destroying system infrastructure machine ({vm_name}) and all stored container data...");
     stop().await?;
-    super::delete::run(DOCKER_VM_NAME, force, true).await?;
-    println!("\x1b[1;32m✓\x1b[0m Docker infrastructure machine destroyed.");
+    super::delete::run(&vm_name, force, true).await?;
+    println!("\x1b[1;32m✓\x1b[0m System infrastructure machine destroyed.");
     Ok(())
 }
 
@@ -304,7 +322,7 @@ pub fn setup_system_symlink(sock_path: &Path) {
 pub async fn status() -> Result<()> {
     let cfg = MachConfig::load()?;
     let sock_path = cfg.data_dir.join("run").join("docker.sock");
-    let docker_vm = super::find_machine(&cfg.machines_dir, DOCKER_VM_NAME)?;
+    let docker_vm = find_system_machine(&cfg.machines_dir)?;
 
     println!("\x1b[1;36m➜\x1b[0m Checking mach Docker status...");
 

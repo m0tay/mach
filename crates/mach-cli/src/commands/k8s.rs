@@ -13,8 +13,14 @@ use crate::commands::find_machine;
 pub const K8S_VM_NAME: &str = "mach-kubernetes";
 pub const ALT_K8S_VM_NAME: &str = "mach-k8s";
 
-pub fn resolve_k8s_machine_name(_machines_dir: &std::path::Path) -> Result<String> {
-    Ok(crate::commands::docker::DOCKER_VM_NAME.to_string())
+pub fn resolve_k8s_machine_name(machines_dir: &std::path::Path) -> Result<String> {
+    if machines_dir.join(crate::commands::docker::SYSTEM_VM_NAME).exists() {
+        return Ok(crate::commands::docker::SYSTEM_VM_NAME.to_string());
+    }
+    if machines_dir.join("mach-docker").exists() {
+        return Ok("mach-docker".to_string());
+    }
+    Ok(crate::commands::docker::SYSTEM_VM_NAME.to_string())
 }
 
 /// Terminate any existing background SSH port-forward tunnel for Kubernetes API (26443).
@@ -114,9 +120,9 @@ pub async fn enable() -> Result<()> {
         }
     }
 
-    // 2. Ensure unified mach-docker VM exists and is running
-    let vm_name = crate::commands::docker::DOCKER_VM_NAME;
+    // 2. Ensure unified system infrastructure VM exists and is running
     let docker_m = crate::commands::docker::ensure_docker_vm(&cfg).await?;
+    let vm_name = docker_m.config.name.clone();
     let mut is_alive = docker_m.state == MachineState::Running && docker_m.pid.map(|p| nix::sys::signal::kill(nix::unistd::Pid::from_raw(p as i32), None).is_ok()).unwrap_or(false);
     if is_alive {
         if let Some(ip) = docker_m.ip_address {
@@ -129,10 +135,10 @@ pub async fn enable() -> Result<()> {
     }
     if !is_alive {
         println!("  \x1b[1;36m➜\x1b[0m Starting unified infrastructure machine ({vm_name})...");
-        crate::commands::start::run(Some(vm_name)).await?;
+        crate::commands::start::run(Some(&vm_name)).await?;
     }
 
-    let m = find_machine(&cfg.machines_dir, vm_name)?
+    let m = find_machine(&cfg.machines_dir, &vm_name)?
         .ok_or_else(|| anyhow::anyhow!("infrastructure machine {vm_name} not found"))?;
     let ip = m.ip_address.context("Unified infrastructure VM has no IP address")?;
 
@@ -418,8 +424,8 @@ pub async fn shell() -> Result<()> {
 /// Show status of the Kubernetes cluster.
 pub async fn status() -> Result<()> {
     let cfg = MachConfig::load()?;
-    let vm_name = crate::commands::docker::DOCKER_VM_NAME;
-    let machine = find_machine(&cfg.machines_dir, vm_name)?;
+    let machine = crate::commands::docker::find_system_machine(&cfg.machines_dir)?;
+    let vm_name = machine.as_ref().map(|m| m.config.name.clone()).unwrap_or_else(|| crate::commands::docker::SYSTEM_VM_NAME.to_string());
 
     match machine {
         Some(m) if m.state == MachineState::Running => {
