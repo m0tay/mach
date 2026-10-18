@@ -52,6 +52,8 @@ struct VmmChildGuard {
     pid: u32,
     pid_file: PathBuf,
     started_successfully: bool,
+    machines_dir: PathBuf,
+    machine_name: String,
 }
 
 impl Drop for VmmChildGuard {
@@ -62,6 +64,13 @@ impl Drop for VmmChildGuard {
                 nix::sys::signal::Signal::SIGKILL,
             );
             let _ = fs::remove_file(&self.pid_file);
+            if let Ok(Some(mut m)) = find_machine(&self.machines_dir, &self.machine_name) {
+                if m.state == MachineState::Starting {
+                    m.state = MachineState::Stopped;
+                    m.pid = None;
+                    let _ = save_machine(&self.machines_dir, &m);
+                }
+            }
         }
     }
 }
@@ -283,6 +292,9 @@ pub async fn run_ext(name: Option<&str>, to_stderr: bool) -> Result<()> {
 
     let (mac_str, lease_pattern) = generate_mac(&machine.id);
 
+    // Launch menu bar status item so user immediately sees startup feedback
+    crate::commands::menu_cmd::ensure_menu_bar_running();
+
     out_ln!("\x1b[1;36m➜\x1b[0m Booting real Linux VM \x1b[1m{}\x1b[0m on Apple Silicon...", machine.config.name);
 
     let log_file = fs::File::create(machine_dir.join("vm.log"))?;
@@ -350,12 +362,18 @@ pub async fn run_ext(name: Option<&str>, to_stderr: bool) -> Result<()> {
     let child_pid = child.id();
     fs::write(machine_dir.join("pid"), child_pid.to_string())?;
 
+    machine.state = MachineState::Starting;
+    machine.pid = Some(child_pid);
+    let _ = save_machine(&cfg.machines_dir, &machine);
+
     let base_ssh = crate::ssh::mach_ssh_args();
 
     let mut guard = VmmChildGuard {
         pid: child_pid,
         pid_file: machine_dir.join("pid"),
         started_successfully: false,
+        machines_dir: cfg.machines_dir.clone(),
+        machine_name: machine.config.name.clone(),
     };
 
     let log_path = machine_dir.join("vm.log");

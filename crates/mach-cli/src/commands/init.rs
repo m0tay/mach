@@ -102,9 +102,11 @@ pub async fn run(non_interactive: bool) -> Result<()> {
     let _ = crate::tls::ensure_tls_cert(&mach_dir);
     println!("  \x1b[1;32m✓\x1b[0m Local wildcard TLS certificates generated (*.mach.local)");
 
-    // 7. macOS Finder file hierarchy (~/Mach)
+    // 7. macOS Finder file hierarchy (~/Mach) & menu bar status item
     let _ = crate::nfs::ensure_finder_hierarchy();
+    crate::commands::menu_cmd::ensure_menu_bar_running();
     println!("  \x1b[1;32m✓\x1b[0m macOS Finder integration prepared at ~/Mach");
+    println!("  \x1b[1;32m✓\x1b[0m macOS Menu bar status item active");
 
     // 8. Run Doctor Health Check
     println!();

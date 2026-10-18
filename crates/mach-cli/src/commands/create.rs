@@ -140,7 +140,9 @@ pub async fn run_ext(
     };
 
     let mut machine = Machine::new(machine_cfg);
-    machine.state = MachineState::Stopped;
+    machine.state = MachineState::Creating;
+    let _ = save_machine(&cfg.machines_dir, &machine);
+    crate::commands::menu_cmd::ensure_menu_bar_running();
 
     let machine_dir = cfg.machines_dir.join(&machine_name);
     std::fs::create_dir_all(&machine_dir)?;
