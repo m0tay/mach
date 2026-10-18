@@ -103,6 +103,34 @@ pub async fn setup(system: bool) -> Result<()> {
         }
     }
 
+    // 2.5 Ensure reverse proxy forwarder on port 80 is active inside VM
+    let proxy_setup_script = r#"which socat >/dev/null || (apt-get update -y >/dev/null 2>&1 && apt-get install -y socat >/dev/null 2>&1);
+if [ ! -f /etc/systemd/system/mach-proxy.service ]; then
+cat << 'EOF' > /etc/systemd/system/mach-proxy.service
+[Unit]
+Description=Mach Reverse Proxy Forwarder
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/socat TCP-LISTEN:80,fork,reuseaddr TCP:192.168.64.1:28080
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+fi
+systemctl enable --now mach-proxy.service >/dev/null 2>&1 || true
+"#;
+    let mut proxy_args = base_ssh.clone();
+    proxy_args.extend([
+        "-o".to_string(), "ConnectTimeout=10".to_string(),
+        format!("root@{ip}"),
+        proxy_setup_script.to_string(),
+    ]);
+    let _ = Command::new("ssh").args(&proxy_args).status();
+
     // 3. Establish socket forwarding to ~/.mach/run/docker.sock
     terminate_docker_ssh_tunnel();
     let run_dir = cfg.data_dir.join("run");

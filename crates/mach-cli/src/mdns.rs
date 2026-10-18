@@ -124,8 +124,8 @@ impl MdnsPublisher {
         }
     }
 
-    /// Synchronize mDNS registrations with all currently running machines.
-    pub fn sync(&mut self, machines_dir: &Path) {
+    /// Synchronize mDNS registrations with all currently running machines and Docker containers.
+    pub async fn sync(&mut self, machines_dir: &Path, docker_sock: &Path) {
         let mut desired = HashMap::new();
 
         // 1. Host and Gateway aliases (192.168.64.1)
@@ -135,8 +135,9 @@ impl MdnsPublisher {
         }
 
         // 2. Discover running machines from disk
+        let mut docker_ip = None;
         if let Ok(machines) = load_all_machines(machines_dir) {
-            for m in machines {
+            for m in &machines {
                 if m.state == MachineState::Running {
                     if let Some(ip) = m.ip_address {
                         let domain = format!("{}.mach.local", m.config.name);
@@ -146,8 +147,22 @@ impl MdnsPublisher {
                         if m.config.name == "mach-kubernetes" || m.config.name == "mach-k8s" {
                             desired.insert("k8s.mach.local".to_string(), ("k8s".to_string(), ip));
                         }
+
+                        if m.config.name == "mach-docker" {
+                            docker_ip = Some(ip);
+                        } else if docker_ip.is_none() {
+                            docker_ip = Some(ip);
+                        }
                     }
                 }
+            }
+        }
+
+        // 3. Discover running Docker containers from docker.sock
+        if let Some(ip) = docker_ip {
+            let container_domains = fetch_docker_container_domains(docker_sock).await;
+            for (instance, domain) in container_domains {
+                desired.insert(domain, (instance, ip));
             }
         }
 
@@ -170,6 +185,85 @@ impl MdnsPublisher {
     }
 }
 
+/// Query Docker daemon Unix socket to extract domain names for active containers.
+async fn fetch_docker_container_domains(docker_sock: &Path) -> Vec<(String, String)> {
+    if !docker_sock.exists() {
+        return Vec::new();
+    }
+    let mut stream = match tokio::net::UnixStream::connect(docker_sock).await {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    if stream
+        .write_all(b"GET /containers/json HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .is_err()
+    {
+        return Vec::new();
+    }
+    let mut buf = Vec::new();
+    if stream.read_to_end(&mut buf).await.is_err() {
+        return Vec::new();
+    }
+
+    let split_pos = buf.windows(4).position(|w| w == b"\r\n\r\n").map(|p| p + 4);
+    let (headers, body) = match split_pos {
+        Some(pos) => (&buf[..pos], &buf[pos..]),
+        None => return Vec::new(),
+    };
+
+    let is_chunked = String::from_utf8_lossy(headers)
+        .to_ascii_lowercase()
+        .contains("transfer-encoding: chunked");
+    let body_bytes = if is_chunked {
+        crate::proxy::decode_chunked_body(body)
+    } else {
+        body.to_vec()
+    };
+
+    let containers: serde_json::Value = match serde_json::from_slice(&body_bytes) {
+        Ok(v) => v,
+        Err(_) => {
+            let fallback = crate::proxy::decode_chunked_body(body);
+            match serde_json::from_slice(&fallback) {
+                Ok(v) => v,
+                Err(_) => return Vec::new(),
+            }
+        }
+    };
+
+    let mut domains = Vec::new();
+    if let serde_json::Value::Array(list) = containers {
+        for c in list {
+            if let Some(names) = c.get("Names").and_then(|v| v.as_array()) {
+                if let Some(first_name) = names.first().and_then(|v| v.as_str()) {
+                    let clean = first_name.trim_start_matches('/');
+                    if !clean.is_empty() {
+                        domains.push((format!("mach-{}", clean), format!("{}.mach.local", clean)));
+                    }
+                }
+            }
+            if let Some(img) = c.get("Image").and_then(|v| v.as_str()) {
+                let repo = img.split(':').next().unwrap_or(img);
+                let clean_repo = repo.rsplit('/').next().unwrap_or(repo);
+                if !clean_repo.is_empty() {
+                    domains.push((format!("mach-{}", clean_repo), format!("{}.mach.local", clean_repo)));
+                }
+            }
+            if let Some(labels) = c.get("Labels") {
+                let svc = labels.get("com.docker.compose.service").and_then(|s| s.as_str());
+                let proj = labels.get("com.docker.compose.project").and_then(|s| s.as_str());
+                if let (Some(s), Some(p)) = (svc, proj) {
+                    domains.push((format!("mach-{}-{}", p, s), format!("{}.{}.mach.local", s, p)));
+                    domains.push((format!("mach-{}", s), format!("{}.mach.local", s)));
+                }
+            }
+        }
+    }
+    domains
+}
+
 impl Drop for MdnsPublisher {
     fn drop(&mut self) {
         for (_, (_, mut child)) in self.processes.drain() {
@@ -180,10 +274,10 @@ impl Drop for MdnsPublisher {
 }
 
 /// Run the background mDNS synchronization loop.
-pub async fn run_mdns_loop(machines_dir: &Path) {
+pub async fn run_mdns_loop(machines_dir: &Path, docker_sock: &Path) {
     let mut publisher = MdnsPublisher::new();
     loop {
-        publisher.sync(machines_dir);
+        publisher.sync(machines_dir, docker_sock).await;
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }

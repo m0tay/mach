@@ -138,6 +138,7 @@ pub fn decode_chunked_body(raw: &[u8]) -> Vec<u8> {
 #[derive(Debug, Clone)]
 pub struct RouteTarget {
     pub name: String,
+    pub image_repo: Option<String>,
     pub compose_service: Option<String>,
     pub compose_project: Option<String>,
     pub port: u16,
@@ -156,24 +157,39 @@ impl RouteTarget {
 }
 
 pub async fn run_reverse_proxy(docker_sock: &Path, machines_dir: &Path) -> Result<()> {
-    // Try binding 80 first, fallback to 8080 if non-root
-    let listener = match TcpListener::bind("127.0.0.1:80").await {
-        Ok(l) => {
-            println!("[proxy] HTTP reverse proxy listening on \x1b[1;32m127.0.0.1:80\x1b[0m");
-            l
-        }
-        Err(_) => {
-            let l = TcpListener::bind("127.0.0.1:8080").await?;
-            println!("[proxy] HTTP reverse proxy listening on \x1b[1;33m127.0.0.1:8080\x1b[0m (port 80 requires root)");
-            l
-        }
-    };
+    // Primary listener: bind 0.0.0.0:28080 for incoming forwarded traffic from VM and host
+    let listener_28080 = TcpListener::bind("0.0.0.0:28080").await?;
+    println!("[proxy] HTTP reverse proxy listening on \x1b[1;32m0.0.0.0:28080\x1b[0m");
+
+    // Optional: attempt binding 127.0.0.1:80 directly if running with elevated privileges
+    let listener_80 = TcpListener::bind("127.0.0.1:80").await.ok();
+    if listener_80.is_some() {
+        println!("[proxy] HTTP reverse proxy also listening on \x1b[1;32m127.0.0.1:80\x1b[0m");
+    }
 
     let sock_path = docker_sock.to_path_buf();
     let m_dir = machines_dir.to_path_buf();
 
+    if let Some(l80) = listener_80 {
+        let sock_clone = sock_path.clone();
+        let m_clone = m_dir.clone();
+        tokio::spawn(async move {
+            loop {
+                if let Ok((client_stream, _peer)) = l80.accept().await {
+                    let s_c = sock_clone.clone();
+                    let m_c = m_clone.clone();
+                    tokio::spawn(async move {
+                        let _ = handle_proxy_conn(client_stream, &s_c, &m_c).await;
+                    });
+                } else {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                }
+            }
+        });
+    }
+
     loop {
-        let (client_stream, _peer) = match listener.accept().await {
+        let (client_stream, _peer) = match listener_28080.accept().await {
             Ok(conn) => conn,
             Err(_) => {
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -361,6 +377,13 @@ pub fn find_target_route<'a>(domain: &str, routes: &'a [RouteTarget]) -> Option<
                 return Some(r);
             }
         }
+
+        // Image repository match (e.g. "nginx" for "nginx:alpine")
+        if let Some(ref img_repo) = r.image_repo {
+            if img_repo.eq_ignore_ascii_case(clean_host) {
+                return Some(r);
+            }
+        }
     }
 
     // Default to the first route if only one container is running
@@ -544,6 +567,12 @@ async fn fetch_container_routes(docker_sock: &Path) -> Result<Vec<RouteTarget>> 
                 .unwrap_or("")
                 .to_string();
 
+            let image = c.get("Image").and_then(|v| v.as_str());
+            let image_repo = image.map(|img| {
+                let repo = img.split(':').next().unwrap_or(img);
+                repo.rsplit('/').next().unwrap_or(repo).to_ascii_lowercase()
+            });
+
             let labels = c.get("Labels");
             let compose_service = labels
                 .and_then(|l| l.get("com.docker.compose.service"))
@@ -589,6 +618,7 @@ async fn fetch_container_routes(docker_sock: &Path) -> Result<Vec<RouteTarget>> 
 
             routes.push(RouteTarget {
                 name: raw_name,
+                image_repo,
                 compose_service,
                 compose_project,
                 port: primary_port,
@@ -674,6 +704,7 @@ mod tests {
         let routes = vec![
             RouteTarget {
                 name: "web-app".to_string(),
+                image_repo: Some("webapp".to_string()),
                 compose_service: Some("web".to_string()),
                 compose_project: Some("proj".to_string()),
                 port: 3000,
@@ -681,6 +712,7 @@ mod tests {
             },
             RouteTarget {
                 name: "db".to_string(),
+                image_repo: Some("postgres".to_string()),
                 compose_service: None,
                 compose_project: None,
                 port: 5432,
@@ -761,6 +793,7 @@ mod tests {
 
         let routes = vec![RouteTarget {
             name: "multi-svc".to_string(),
+            image_repo: None,
             compose_service: Some("web".to_string()),
             compose_project: Some("myapp".to_string()),
             port: closed_port,

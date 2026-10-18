@@ -32,6 +32,15 @@ cp "$SCRIPT_DIR/man/man1/machctl.1" "$MAN_DIR/"
 
 echo -e "\x1b[1;32m✓\x1b[0m Installed and signed mach at $CARGO_BIN_DIR/mach"
 
+# Also update Homebrew Caskroom binary if present
+VERSION=$(grep '^version = ' "$SCRIPT_DIR/Cargo.toml" | head -n 1 | cut -d '"' -f 2)
+CASK_BIN_DIR="/opt/homebrew/Caskroom/mach/$VERSION"
+if [[ -d "$CASK_BIN_DIR" ]]; then
+    cp "$RELEASE_BIN" "$CASK_BIN_DIR/mach"
+    codesign -s - --entitlements "$SCRIPT_DIR/entitlements.plist" --force "$CASK_BIN_DIR/mach"
+    echo -e "\x1b[1;32m✓\x1b[0m Updated and signed Homebrew Caskroom binary at $CASK_BIN_DIR/mach"
+fi
+
 # 2. Package Homebrew distribution tarball
 VERSION=$(grep '^version = ' "$SCRIPT_DIR/Cargo.toml" | head -n 1 | cut -d '"' -f 2)
 echo -e "\x1b[1;36m➜\x1b[0m Packaging distribution archive for Homebrew (v$VERSION)..."

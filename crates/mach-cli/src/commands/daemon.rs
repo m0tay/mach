@@ -44,8 +44,9 @@ pub async fn run_foreground() -> Result<()> {
     });
 
     let m_dir_mdns = machines_dir.clone();
+    let ds_mdns = docker_sock.clone();
     let mdns_task = tokio::spawn(async move {
-        crate::mdns::run_mdns_loop(&m_dir_mdns).await;
+        crate::mdns::run_mdns_loop(&m_dir_mdns, &ds_mdns).await;
     });
 
     let ds_clone = docker_sock.clone();

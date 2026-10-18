@@ -284,17 +284,22 @@ async fn main() -> Result<()> {
 
             // In mach, control plane administrative commands belong exclusively to machctl.
             // If invoked via mach, provide clean guidance pointing to machctl.
+            // Exception: 'daemon run' is the internal background worker process spawned by start_daemon().
             let ctl_only_commands = [
                 "doctor", "inspect", "dump", "top", "config", "daemon", "dns", "tls",
                 "mount", "code", "link", "debug", "export", "import", "clone", "rename",
                 "uninstall",
             ];
             if ctl_only_commands.contains(&first_arg.as_str()) {
-                eprintln!(
-                    "In mach, 'machctl' manages the macOS virtualization control plane.\nUse: machctl {} [options]\n'mach' is reserved for daily Linux shell and command execution (e.g. 'mach uname -a').\n",
-                    first_arg
-                );
-                anyhow::bail!("'{first_arg}' is a control plane command. Run 'machctl {first_arg}' instead.");
+                if first_arg == "daemon" && raw_args.iter().any(|a| a == "run") {
+                    // Internal daemon worker process spawned by start_daemon() - allow execution!
+                } else {
+                    eprintln!(
+                        "In mach, 'machctl' manages the macOS virtualization control plane.\nUse: machctl {} [options]\n'mach' is reserved for daily Linux shell and command execution (e.g. 'mach uname -a').\n",
+                        first_arg
+                    );
+                    anyhow::bail!("'{first_arg}' is a control plane command. Run 'machctl {first_arg}' instead.");
+                }
             }
 
             // In `mach`, only basic machine verbs are intercepted locally;
@@ -303,7 +308,7 @@ async fn main() -> Result<()> {
                 "start", "stop", "restart", "shell", "create", "delete", "list", "ls",
                 "default", "init", "help", "--help", "-h", "version", "--version", "-V",
                 "menu", "run", "setup", "completion", "boot", "run-vm", "update",
-                "info", "status", "logs", "ssh", "push", "pull",
+                "info", "status", "logs", "ssh", "push", "pull", "daemon",
             ];
 
             let cmd_name = &raw_args[idx];
