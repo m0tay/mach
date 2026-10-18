@@ -1,6 +1,6 @@
 cask "mach" do
   version "0.6.0"
-  sha256 "75f0c9cda556e75aef4078667ebafe98fba14408d6f8aa57088fafe9d5180bdc"
+  sha256 "aac0731b2b74382150451278b58784090f10f4c8938dfd3a125ecc6fd0de3464"
 
   url "file:///Users/douglaslobo/Developer/mach/dist/mach-0.6.0-aarch64-apple-darwin.tar.gz"
   name "Mach"
