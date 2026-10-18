@@ -190,28 +190,40 @@ fn lookup_dhcp_lease(
 }
 
 pub async fn run(name: Option<&str>) -> Result<()> {
-    run_ext(name, false).await
+    run_ext_impl(name, false, false).await
 }
 
 pub async fn run_ext(name: Option<&str>, to_stderr: bool) -> Result<()> {
+    run_ext_impl(name, to_stderr, false).await
+}
+
+pub async fn run_quiet(name: Option<&str>) -> Result<()> {
+    run_ext_impl(name, true, true).await
+}
+
+async fn run_ext_impl(name: Option<&str>, to_stderr: bool, quiet: bool) -> Result<()> {
     macro_rules! out_ln {
         ($($arg:tt)*) => {
-            if to_stderr {
-                eprintln!($($arg)*);
-            } else {
-                println!($($arg)*);
+            if !quiet {
+                if to_stderr {
+                    eprintln!($($arg)*);
+                } else {
+                    println!($($arg)*);
+                }
             }
         };
     }
 
     macro_rules! out_pr {
         ($($arg:tt)*) => {
-            if to_stderr {
-                eprint!($($arg)*);
-                let _ = std::io::Write::flush(&mut std::io::stderr());
-            } else {
-                print!($($arg)*);
-                let _ = std::io::Write::flush(&mut std::io::stdout());
+            if !quiet {
+                if to_stderr {
+                    eprint!($($arg)*);
+                    let _ = std::io::Write::flush(&mut std::io::stderr());
+                } else {
+                    print!($($arg)*);
+                    let _ = std::io::Write::flush(&mut std::io::stdout());
+                }
             }
         };
     }
@@ -263,10 +275,12 @@ pub async fn run_ext(name: Option<&str>, to_stderr: bool) -> Result<()> {
                     out_ln!("Machine \x1b[1m{}\x1b[0m is already running (PID: {}).", machine.config.name, pid);
                     out_ln!("  IP Address:  \x1b[1;34m{}\x1b[0m", ip);
                     out_ln!("  SSH Command: \x1b[1;32mssh root@{}\x1b[0m", ip);
-                    out_ln!("\nNext steps:");
-                    out_ln!("  ➜ To open shell:      \x1b[1;32mmach\x1b[0m (or \x1b[1;32mmach shell {}\x1b[0m)", machine.config.name);
-                    out_ln!("  ➜ To run commands:    \x1b[1;32mmach uname -a\x1b[0m");
-                    out_ln!("  ➜ To view dashboard:  \x1b[1;34mmachctl top\x1b[0m");
+                    if !to_stderr && !quiet {
+                        out_ln!("\nNext steps:");
+                        out_ln!("  ➜ To open shell:      \x1b[1;32mmach\x1b[0m (or \x1b[1;32mmach shell {}\x1b[0m)", machine.config.name);
+                        out_ln!("  ➜ To run commands:    \x1b[1;32mmach uname -a\x1b[0m");
+                        out_ln!("  ➜ To view dashboard:  \x1b[1;34mmachctl top\x1b[0m");
+                    }
                     return Ok(());
                 }
             }
@@ -473,7 +487,9 @@ pub async fn run_ext(name: Option<&str>, to_stderr: bool) -> Result<()> {
 
     // Install host bridge CLI `mac` inside guest
     if let Err(e) = crate::bridge::install_guest_mac_cli(ip) {
-        eprintln!("[mach] Notice: failed to install guest mac CLI: {e}");
+        if !quiet {
+            eprintln!("[mach] Notice: failed to install guest mac CLI: {e}");
+        }
     }
 
     // Immediately publish native Apple Silicon mDNS domain (<name>.mach.local)
@@ -572,7 +588,7 @@ pub async fn run_ext(name: Option<&str>, to_stderr: bool) -> Result<()> {
         });
     }
 
-    if !to_stderr {
+    if !to_stderr && !quiet {
         println!("\nNext steps:");
         println!("  ➜ To open shell:      \x1b[1;32mmach\x1b[0m (or \x1b[1;32mmach shell {}\x1b[0m)", machine.config.name);
         println!("  ➜ To run commands:    \x1b[1;32mmach uname -a\x1b[0m");

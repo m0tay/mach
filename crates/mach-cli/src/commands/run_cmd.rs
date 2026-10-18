@@ -43,7 +43,7 @@ pub async fn run(
         if user_machines.is_empty() {
             eprintln!("No Linux machine found. Preparing your environment...");
             crate::commands::setup::run_streamlined(true).await?;
-            eprintln!("\x1b[1;32m✓\x1b[0m Environment ready!\n");
+            eprintln!("\x1b[1;32m✓\x1b[0m Environment ready");
             MachConfig::load()?
         } else {
             cfg

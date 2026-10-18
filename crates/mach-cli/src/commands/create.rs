@@ -44,12 +44,65 @@ pub async fn run_ext(
     show_next_steps: bool,
     to_stderr: bool,
 ) -> Result<()> {
+    run_ext_impl(
+        distro,
+        name,
+        cpus,
+        memory,
+        disk,
+        arch_str,
+        isolated,
+        show_next_steps,
+        to_stderr,
+        false,
+    )
+    .await
+}
+
+pub async fn run_ext_quiet(
+    distro: &str,
+    name: Option<&str>,
+    cpus: u32,
+    memory: u64,
+    disk: u64,
+    arch_str: &str,
+    isolated: bool,
+) -> Result<()> {
+    run_ext_impl(
+        distro,
+        name,
+        cpus,
+        memory,
+        disk,
+        arch_str,
+        isolated,
+        false,
+        true,
+        true,
+    )
+    .await
+}
+
+async fn run_ext_impl(
+    distro: &str,
+    name: Option<&str>,
+    cpus: u32,
+    memory: u64,
+    disk: u64,
+    arch_str: &str,
+    isolated: bool,
+    show_next_steps: bool,
+    to_stderr: bool,
+    quiet: bool,
+) -> Result<()> {
     macro_rules! out_ln {
         ($($arg:tt)*) => {
-            if to_stderr {
-                eprintln!($($arg)*);
-            } else {
-                println!($($arg)*);
+            if !quiet {
+                if to_stderr {
+                    eprintln!($($arg)*);
+                } else {
+                    println!($($arg)*);
+                }
             }
         };
     }
@@ -113,14 +166,18 @@ pub async fn run_ext(
         );
     }
 
+    let streamlined = isolated || to_stderr;
+
     out_ln!("\x1b[1;36m➜\x1b[0m Creating machine \x1b[1m{}\x1b[0m...", machine_name);
-    out_ln!("  Distribution: \x1b[33m{}\x1b[0m", distro);
-    out_ln!("  Architecture: \x1b[33m{}\x1b[0m", arch);
-    out_ln!("  CPUs:         \x1b[33m{}\x1b[0m", cpus);
-    out_ln!("  Memory:       \x1b[33m{} MiB\x1b[0m", memory);
-    out_ln!("  Disk:         \x1b[33m{} GiB\x1b[0m", disk);
-    if isolated {
-        out_ln!("  Isolated:     \x1b[33mtrue (host file sharing disabled)\x1b[0m");
+    if !streamlined {
+        out_ln!("  Distribution: \x1b[33m{}\x1b[0m", distro);
+        out_ln!("  Architecture: \x1b[33m{}\x1b[0m", arch);
+        out_ln!("  CPUs:         \x1b[33m{}\x1b[0m", cpus);
+        out_ln!("  Memory:       \x1b[33m{} MiB\x1b[0m", memory);
+        out_ln!("  Disk:         \x1b[33m{} GiB\x1b[0m", disk);
+        if isolated {
+            out_ln!("  Isolated:     \x1b[33mtrue (host file sharing disabled)\x1b[0m");
+        }
     }
 
     let is_sys = machine_name == "mach-system"
@@ -162,7 +219,9 @@ pub async fn run_ext(
         let cached_raw = images::ensure_cached_image_ext(&cache_dir, info, to_stderr).await?;
 
         if !disk_path.exists() {
-            out_ln!("  \x1b[1;36m➜\x1b[0m Provisioning disk image (APFS instant clone)...");
+            if !streamlined {
+                out_ln!("  \x1b[1;36m➜\x1b[0m Provisioning disk image (APFS instant clone)...");
+            }
             mach_common::fs::apfs_clone(&cached_raw, &disk_path)?;
 
             // Expand disk to requested size
@@ -172,7 +231,9 @@ pub async fn run_ext(
 
         // Generate cloud-init seed disk
         let cidata_path = machine_dir.join("cidata.iso");
-        out_ln!("  \x1b[1;36m➜\x1b[0m Generating cloud-init seed configuration...");
+        if !streamlined {
+            out_ln!("  \x1b[1;36m➜\x1b[0m Generating cloud-init seed configuration...");
+        }
         cloud_init::generate_cidata_iso(&machine.id, &machine_name, &cidata_path)?;
     }
 
@@ -188,7 +249,7 @@ pub async fn run_ext(
         machine_name,
         machine.short_id()
     );
-    if show_next_steps {
+    if show_next_steps && !streamlined {
         out_ln!("\nNext steps:");
         out_ln!("  ➜ To start machine:   \x1b[1;34mmach start {}\x1b[0m", machine_name);
         out_ln!("  ➜ To open shell:      \x1b[1;32mmach\x1b[0m (or \x1b[1;32mmach shell {}\x1b[0m)", machine_name);
