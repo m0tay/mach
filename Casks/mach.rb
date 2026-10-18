@@ -1,6 +1,6 @@
 cask "mach" do
   version "0.6.0"
-  sha256 "7ffa4f18caa481fd3df918fb7c0a54613c940914948e7c5a5e5326524526117b"
+  sha256 "06e60de53dcf08d7d6a394114ecb4b2aac05a60f933f225f94e97c760a107411"
 
   url "file:///Users/douglaslobo/Developer/mach/dist/mach-0.6.0-aarch64-apple-darwin.tar.gz"
   name "Mach"
@@ -19,10 +19,10 @@ cask "mach" do
   zsh_completion "completions/_machctl"
   fish_completion "completions/mach.fish"
 
-  postflight do
-    system_command "/usr/bin/xattr", args: ["-cr", staged_path]
-    system_command "/usr/bin/codesign", args: ["--force", "--entitlements", "#{staged_path}/entitlements.plist", "--sign", "-", "#{staged_path}/mach"]
-    system_command "#{HOMEBREW_PREFIX}/bin/mach", args: ["init", "--non-interactive"]
+  postflight_steps do
+    run "/usr/bin/xattr", args: ["-cr", "{{staged_path}}"]
+    run "/usr/bin/codesign", args: ["--force", "--entitlements", "{{staged_path}}/entitlements.plist", "--sign", "-", "{{staged_path}}/mach"]
+    run "{{HOMEBREW_PREFIX}}/bin/mach", args: ["init", "--non-interactive"]
   end
 
   uninstall early_script: {

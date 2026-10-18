@@ -309,23 +309,12 @@ pub async fn run(all: bool, force: bool, keep_data: bool) -> Result<()> {
         println!("  \x1b[1;34mℹ\x1b[0m Preserved machine disk images in ~/.mach (pass --all to remove)");
     }
 
-    // 13. Clean cached Homebrew download archives
-    if let Some(home) = dirs::home_dir() {
-        let cache_dir = home.join("Library/Caches/Homebrew/downloads");
-        if let Ok(entries) = std::fs::read_dir(&cache_dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                let name_str = name.to_string_lossy();
-                if name_str.contains("mach") || name_str.contains("norb") {
-                    let _ = std::fs::remove_file(entry.path());
-                }
-            }
-        }
-    }
+    println!("\n\x1b[1;32m✓\x1b[0m Mach has been cleanly uninstalled from your system!\n");
 
-    println!("\n\x1b[1;32m✓\x1b[0m Mach has been cleanly uninstalled from your system!");
-    println!("\nTo complete binary package removal via Homebrew, run:");
-    println!("  \x1b[1;36mbrew uninstall mach\x1b[0m\n");
+    if !force {
+        println!("To complete binary package removal via Homebrew, run:");
+        println!("  \x1b[1;36mbrew uninstall mach\x1b[0m\n");
+    }
 
     Ok(())
 }
