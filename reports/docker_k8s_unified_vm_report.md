@@ -1,3 +1,13 @@
+# Historical architecture proposal — superseded
+
+This report is retained as an unverified historical design proposal. It does not describe current behavior. Its timings, memory savings, competitor comparisons, failure statistics, and guarantees lack reproducible evidence and must not be cited as measurements.
+
+Current implementation places Docker and K3s in `mach-system`, with separate dockerd and K3s containerd image stores. The proposed K3s `--docker` integration and automatic shared-image workflow below were superseded. A unified VM alone does not merge runtime stores, guarantee port forwarding, eliminate DHCP failures, or provide OOM immunity.
+
+For current command behavior use README.md and the manpages; for release validation use actual coordinator logs.
+
+---
+
 # Mach Architectural Report: Unified VM vs. Multi-VM for Docker & Kubernetes
 
 **Date**: October 18, 2026  

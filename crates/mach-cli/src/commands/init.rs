@@ -35,7 +35,7 @@ pub async fn run(non_interactive: bool) -> Result<()> {
     // 2. Safe Mach configuration (load or create with defaults, NEVER overwrite existing user settings)
     let config_path = mach_dir.join("config.yaml");
     let legacy_config = mach_dir.join("config.json");
-    let mut cfg = MachConfig::load().unwrap_or_default();
+    let mut cfg = MachConfig::load().context("failed to load existing Mach configuration")?;
 
     if !config_path.exists() && !legacy_config.exists() {
         cfg.default_distro = "debian".to_string();
@@ -67,7 +67,7 @@ pub async fn run(non_interactive: bool) -> Result<()> {
         if let Ok(content) = fs::read_to_string(&user_ssh_config) {
             if !content.contains("BEGIN MACH MANAGED BLOCK") {
                 let backup_path = ssh_dir.join("config.mach-bak");
-                let _ = fs::copy(&user_ssh_config, &backup_path);
+                fs::copy(&user_ssh_config, &backup_path).context("failed to back up user SSH configuration")?;
                 println!("  \x1b[1;32m✓\x1b[0m Created safety backup of user SSH config at {}", backup_path.display());
             }
         }
@@ -80,38 +80,31 @@ pub async fn run(non_interactive: bool) -> Result<()> {
     let docker_bin = super::find_binary("docker");
     if let Some(ref bin) = docker_bin {
         let sock_path = mach_dir.join("run").join("docker.sock");
-        let _ = Command::new(bin).args(["context", "rm", "-f", "mach"]).output();
-        let _ = Command::new(bin)
-            .args([
-                "context",
-                "create",
-                "mach",
-                "--docker",
-                &format!("host=unix://{}", sock_path.display()),
-                "--description",
-                "mach Docker Engine (Apple Silicon)",
-            ])
-            .output();
-        let _ = Command::new(bin).args(["context", "use", "mach"]).output();
+        let exists = Command::new(bin).args(["context", "inspect", "mach"]).output()
+            .context("failed to inspect Docker context")?.status.success();
+        let action = if exists { "update" } else { "create" };
+        let output = Command::new(bin)
+            .args(["context", action, "mach", "--docker", &format!("host=unix://{}", sock_path.display()), "--description", "mach Docker Engine (Apple Silicon)"])
+            .output().context("failed to configure Docker context")?;
+        anyhow::ensure!(output.status.success(), "failed to configure Docker context: {}", String::from_utf8_lossy(&output.stderr));
         println!("  \x1b[1;32m✓\x1b[0m Docker CLI context 'mach' configured (unix://{})", sock_path.display());
     } else {
         println!("  - Docker CLI not detected on macOS (run 'machctl docker start' when installed)");
     }
 
-    // 6. Local wildcard TLS CA (*.mach.local)
-    let _ = crate::tls::ensure_tls_cert(&mach_dir);
-    println!("  \x1b[1;32m✓\x1b[0m Local wildcard TLS certificates generated (*.mach.local)");
-
-    // 7. macOS Finder file hierarchy (~/Mach) & menu bar status item
-    let _ = crate::nfs::ensure_finder_hierarchy();
+    // Optional integrations report their own failures without claiming they succeeded.
+    match crate::tls::ensure_tls_cert(&mach_dir) {
+        Ok(_) => println!("  ✓ Local wildcard TLS certificates ready (*.mach.local)"),
+        Err(error) => eprintln!("  Warning: local TLS certificates unavailable: {error:#}"),
+    }
+    match crate::nfs::ensure_finder_hierarchy() {
+        Ok(_) => println!("  ✓ macOS Finder integration prepared at ~/Mach"),
+        Err(error) => eprintln!("  Warning: Finder integration unavailable: {error:#}"),
+    }
     crate::commands::menu_cmd::ensure_menu_bar_running();
-    println!("  \x1b[1;32m✓\x1b[0m macOS Finder integration prepared at ~/Mach");
-    println!("  \x1b[1;32m✓\x1b[0m macOS Menu bar status item active");
+    println!("  Menu bar launch requested");
+    crate::commands::doctor::run().await.context("initialization health check failed")?;
+    println!("\n✓ Mach configuration initialized. Review health-check results above before use.");
 
-    // 8. Run Doctor Health Check
-    println!();
-    let _ = crate::commands::doctor::run().await;
-
-    println!("\n\x1b[1;32m✓\x1b[0m mach initialization complete and ready to use!");
     Ok(())
 }

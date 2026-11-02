@@ -3,17 +3,22 @@
 # Mach Real-Deal Comprehensive Integration & Parity Test Suite
 #
 # Tests real virtualization primitives against the live macOS engine:
-# 1. Machine auto-naming and auto-default setting
+# 1. Machine creation and listing
 # 2. Real Linux VM boot (direct Alpine & cloud-init Debian)
 # 3. Real guest outbound internet access (NAT + DNS)
 # 4. Real VirtioFS bidirectional host file sharing (/Users)
-# 5. Real macOS host command bridge (mac pbcopy -> host pbpaste)
-# 6. Real APFS Copy-on-Write disk isolation between clones
+# 6. Disk state isolation between clones
 # 7. Real Apple Silicon Rosetta 2 for Linux (x86_64 execution on ARM64)
 # 8. Real Docker Engine & dynamic port forwarding (guest nginx -> host curl)
 # ==============================================================================
 
-set -eo pipefail
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/test_helpers.sh"
+ALP="real-alp-$TEST_ID"
+DEB="real-deb-$TEST_ID"
+CLONE="real-clone-$TEST_ID"
+MACH_TEST_MACHINES=("$ALP" "$DEB" "$CLONE")
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -35,51 +40,40 @@ function fail() {
     FAIL_COUNT=$((FAIL_COUNT + 1))
 }
 
-function cleanup() {
-    echo -e "\n${CYAN}➜ Cleaning up test machines...${NC}"
-    mach stop --force >/dev/null 2>&1 || true
-    for m in real-alp real-deb real-clone; do
-        mach delete "$m" -y >/dev/null 2>&1 || true
-    done
-    rm -f /tmp/mach_host_to_guest.tmp /tmp/mach_guest_to_host.tmp
-}
-
-trap cleanup EXIT
-
 echo -e "\n${BLUE}======================================================================${NC}"
 echo -e "${BLUE}       Mach 'Real-Deal' Live Virtualization & Parity Test Suite       ${NC}"
 echo -e "${BLUE}======================================================================${NC}\n"
 
 # ------------------------------------------------------------------------------
-# Phase 1: Machine Auto-Naming & Default Setting
+# Phase 1: Machine Creation & Listing
 # ------------------------------------------------------------------------------
-echo -e "${YELLOW}[Phase 1] Testing Smart Creation & Auto-Default...${NC}"
-mach create alpine real-alp --cpus 2 --memory 1024 --disk 5 >/dev/null
-pass "Created base machine 'real-alp'"
+echo -e "${YELLOW}[Phase 1] Testing Creation & Listing...${NC}"
+mach create alpine $ALP --cpus 2 --memory 1024 --disk 5 >/dev/null
+pass "Created base machine '$ALP'"
 
 LS_OUTPUT=$(mach ls)
-if echo "$LS_OUTPUT" | grep -q "real-alp"; then
-    pass "Machine 'real-alp' appears in machine listing"
+if echo "$LS_OUTPUT" | grep -q "$ALP"; then
+    pass "Machine '$ALP' appears in machine listing"
 else
-    fail "Machine 'real-alp' not found in listing"
+    fail "Machine '$ALP' not found in listing"
 fi
 
 # ------------------------------------------------------------------------------
 # Phase 2: Real VM Boot & Guest Outbound Networking
 # ------------------------------------------------------------------------------
 echo -e "\n${YELLOW}[Phase 2] Booting VM & Verifying Guest Internet (NAT & DNS)...${NC}"
-mach start real-alp >/dev/null
-pass "VM 'real-alp' started and acquired DHCP lease"
+mach start $ALP >/dev/null
+pass "VM '$ALP' started and acquired DHCP lease"
 
 # Verify outbound ping
-if mach run real-alp ping -c 2 1.1.1.1 >/dev/null 2>&1; then
+if mach -m "$ALP" ping -c 2 1.1.1.1 >/dev/null 2>&1; then
     pass "Guest can reach the Internet directly via NAT (ping 1.1.1.1)"
 else
     fail "Guest failed to reach 1.1.1.1 via NAT"
 fi
 
 # Verify DNS resolution inside guest
-DNS_RESP=$(mach run real-alp nslookup google.com 2>/dev/null || true)
+DNS_RESP=$(mach -m "$ALP" nslookup google.com 2>/dev/null || true)
 if echo "$DNS_RESP" | grep -q "Address"; then
     pass "Guest DNS resolution is working (nslookup google.com)"
 else
@@ -90,12 +84,12 @@ fi
 # Phase 3: Real VirtioFS Bidirectional Host Sharing (/Users)
 # ------------------------------------------------------------------------------
 echo -e "\n${YELLOW}[Phase 3] Testing VirtioFS 1:1 Host File Sharing (/Users)...${NC}"
-HOST_TEST_FILE="$PWD/mach_host_test_file.tmp"
+HOST_TEST_FILE="$SCRIPT_DIR/../mach-host-$TEST_ID.tmp"
 TOKEN="MACH-VIRTIOFS-TOKEN-$(date +%s)-$RANDOM"
 echo "$TOKEN" > "$HOST_TEST_FILE"
 
 # Guest reads host file via /Users mount
-GUEST_READ=$(mach run real-alp cat "$HOST_TEST_FILE" 2>/dev/null || true)
+GUEST_READ=$(mach -m "$ALP" cat "$HOST_TEST_FILE" 2>/dev/null || true)
 if [ "$GUEST_READ" = "$TOKEN" ]; then
     pass "Guest read file from host via VirtioFS with exact matching content"
 else
@@ -103,9 +97,9 @@ else
 fi
 
 # Guest writes back to host via VirtioFS
-GUEST_WRITE_FILE="$PWD/mach_guest_write_file.tmp"
+GUEST_WRITE_FILE="$SCRIPT_DIR/../mach-guest-$TEST_ID.tmp"
 rm -f "$GUEST_WRITE_FILE"
-mach run real-alp touch "$GUEST_WRITE_FILE"
+mach -m "$ALP" touch "$GUEST_WRITE_FILE"
 if [ -f "$GUEST_WRITE_FILE" ]; then
     pass "Guest wrote file back to host via VirtioFS successfully"
 else
@@ -116,37 +110,37 @@ rm -f "$HOST_TEST_FILE" "$GUEST_WRITE_FILE"
 # ------------------------------------------------------------------------------
 # Phase 4: APFS Copy-on-Write Disk Isolation
 # ------------------------------------------------------------------------------
-echo -e "\n${YELLOW}[Phase 4] Testing APFS Copy-on-Write Disk Clone & State Isolation...${NC}"
-mach stop real-alp >/dev/null
-machctl clone real-alp real-clone >/dev/null
-pass "APFS instant cloned 'real-alp' -> 'real-clone'"
+echo -e "\n${YELLOW}[Phase 4] Testing Disk Clone & State Isolation...${NC}"
+mach stop $ALP >/dev/null
+machctl clone $ALP $CLONE >/dev/null
+pass "Cloned '$ALP' -> '$CLONE'"
 
 # Start clone and write unique marker
-mach start real-clone >/dev/null
-mach run real-clone touch /tmp/only-in-clone.marker
-mach stop real-clone >/dev/null
+mach start $CLONE >/dev/null
+mach -m "$CLONE" touch /tmp/only-in-clone.marker
+mach stop $CLONE >/dev/null
 
 # Start parent and verify isolation
-mach start real-alp >/dev/null
-PARENT_CHECK=$(mach run real-alp test -f /tmp/only-in-clone.marker && echo "LEAKED" || echo "ISOLATED")
+mach start $ALP >/dev/null
+PARENT_CHECK=$(mach -m "$ALP" sh -c 'if test -f /tmp/only-in-clone.marker; then echo LEAKED; else echo ISOLATED; fi')
 if [ "$PARENT_CHECK" = "ISOLATED" ]; then
-    pass "APFS CoW verified: Parent disk is isolated and unaffected by clone modifications"
+    pass "Clone isolation verified: Parent disk is isolated and unaffected by clone modifications"
 else
-    fail "APFS CoW isolation failed: Clone modification leaked to parent!"
+    fail "Clone isolation failed: Clone modification leaked to parent!"
 fi
 
 # ------------------------------------------------------------------------------
 # Phase 5: Debian Cloud-Init & Apple Rosetta 2 Execution
 # ------------------------------------------------------------------------------
 echo -e "\n${YELLOW}[Phase 5] Booting Debian & Verifying Apple Silicon Rosetta 2...${NC}"
-mach create debian real-deb --cpus 2 --memory 2048 --disk 20 >/dev/null
-pass "Created Debian 12 machine 'real-deb'"
+mach create debian $DEB --cpus 2 --memory 2048 --disk 20 >/dev/null
+pass "Created Debian 12 machine '$DEB'"
 
-mach start real-deb >/dev/null
+mach start $DEB >/dev/null
 pass "Debian 12 booted successfully"
 
 # Check Rosetta mount and binfmt_misc
-ROSETTA_ACTIVE=$(mach run real-deb test -f /proc/sys/fs/binfmt_misc/rosetta && echo YES || echo NO)
+ROSETTA_ACTIVE=$(mach -m "$DEB" test -f /proc/sys/fs/binfmt_misc/rosetta && echo YES || echo NO)
 if [ "$ROSETTA_ACTIVE" = "YES" ]; then
     pass "Apple Silicon Rosetta 2 registered in guest kernel (/proc/sys/fs/binfmt_misc/rosetta)"
 else
@@ -157,9 +151,9 @@ fi
 # Phase 6: Docker Engine & Dynamic Port Forwarding
 # ------------------------------------------------------------------------------
 echo -e "\n${YELLOW}[Phase 6] Testing Docker Engine & Dynamic Port Forwarding...${NC}"
-mach stop real-deb >/dev/null
-mach start real-alp >/dev/null
-machctl docker setup >/dev/null
+mach stop $DEB >/dev/null
+mach start $ALP >/dev/null
+machctl docker start >/dev/null
 pass "Docker context 'mach' configured"
 
 # Check docker ps
@@ -187,17 +181,22 @@ else
 fi
 
 # Run an Nginx container and verify dynamic port forwarding
-docker --context mach run -d --name real-nginx -p 8989:80 nginx:alpine >/dev/null
-sleep 3
+MACH_TEST_CONTAINER="mach-nginx-$TEST_ID"
+HOST_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+docker --context mach run -d --name "$MACH_TEST_CONTAINER" -p "$HOST_PORT:80" nginx:alpine >/dev/null
+for attempt in {1..30}; do
+    CURL_OUT=$(curl -fsS --max-time 2 "http://127.0.0.1:$HOST_PORT" 2>/dev/null || true)
+    [[ "$CURL_OUT" == *"Welcome to nginx!"* ]] && break
+    sleep 1
+done
 
-CURL_OUT=$(curl -s --max-time 3 http://127.0.0.1:8989 || true)
 if echo "$CURL_OUT" | grep -q "Welcome to nginx!"; then
-    pass "Dynamic Port Forwarding verified: macOS 'curl http://127.0.0.1:8989' reached container"
+    pass "Dynamic Port Forwarding verified: macOS 'curl http://127.0.0.1:$HOST_PORT' reached container"
 else
-    fail "Port forwarding to container port 8989 failed: $CURL_OUT"
+    fail "Port forwarding to container port $HOST_PORT failed: $CURL_OUT"
 fi
 
-docker --context mach rm -f real-nginx >/dev/null
+docker --context mach rm -f "$MACH_TEST_CONTAINER" >/dev/null
 
 echo -e "\n${BLUE}======================================================================${NC}"
 echo -e "Real-Deal Test Results: ${GREEN}${PASS_COUNT} Passed${NC}, ${RED}${FAIL_COUNT} Failed${NC}"

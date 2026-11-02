@@ -214,10 +214,10 @@ pub fn resolve_target_machine_ext(cfg: &MachConfig, name_opt: Option<&str>, allo
     }
 
     if running.len() > 1 {
-        bail!("multiple running machines found; please specify a machine name or set a default with `mach default <name>`");
+        bail!("multiple running machines found; please specify a machine name or set a default with `machctl default <name>`");
     }
 
-    bail!("multiple machines found; please specify a machine name or set a default with `mach default <name>`");
+    bail!("multiple machines found; please specify a machine name or set a default with `machctl default <name>`");
 }
 
 /// Find any active hypervisor process running for a machine by scanning the macOS process table.
@@ -266,7 +266,7 @@ pub fn kill_running_vm_processes(machine_name_opt: Option<&str>) {
 
 /// Restore Docker and Kubernetes in the background if they were running in the previous session.
 pub fn restore_services_background(cfg: &MachConfig) {
-    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("mach"));
+    let exe = std::env::current_exe().map(|p| p.with_file_name("machctl")).unwrap_or_else(|_| std::path::PathBuf::from("machctl"));
 
     // 1. Restore Docker engine if active in previous session
     if cfg.docker.was_running {
@@ -303,7 +303,7 @@ pub fn restore_services_background(cfg: &MachConfig) {
 
         if !is_running {
             let _ = std::process::Command::new(&exe)
-                .args(["k8s", "start"])
+                .args(["k8s", "enable"])
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())

@@ -1,22 +1,27 @@
-.TH MACHCTL 1 "October 2026" "Mach 0.14.0" "Machctl Manual"
+.TH MACHCTL 1 "November 2, 2026" "Mach 0.15.0" "Machctl Manual"
 .SH NAME
-machctl \- administrative control plane for Mach Linux machines, containers, and Kubernetes
+machctl \- administrative control plane for Mach Linux machines, containers,
+and Kubernetes
 .SH SYNOPSIS
 .B machctl
 [\fIcommand\fR] [\fIflags\fR]
 .SH DESCRIPTION
 .B machctl
-is the complete management and orchestration CLI for \fBMach\fR, providing comprehensive controls for Linux virtual machines, OCI container integration, Kubernetes clusters, Apple Silicon Rosetta 2 translation, networking, and system diagnostics.
+is the management CLI for \fBMach\fR, providing controls for Linux virtual
+machines, OCI container integration, Kubernetes clusters, Apple Silicon
+Rosetta 2 translation, networking, and system diagnostics.
 
 .SH LINUX MACHINE COMMANDS
 .TP
-.BI create " [" options "] [" name "]"
+.BI create " [" distro "] [" name "] [" options "]"
 Create a new Linux virtual machine.
 Options:
 .RS
 .TP
-.BI \-d " " distro ", " \-\-distro " " distro
-Linux distribution (\fIdebian\fR, \fIubuntu\fR, \fIfedora\fR, \fIalpine\fR). Defaults to \fIdebian\fR.
+.BI distro
+Linux distribution (\fIdebian\fR, \fIubuntu\fR, \fIfedora\fR, \fIalpine\fR).
+Defaults to \fIubuntu\fR. The machine name defaults to the distro name, with a
+numeric suffix if needed.
 .TP
 .BI \-c " " cpus ", " \-\-cpus " " cpus
 Number of virtual CPUs (defaults to 2).
@@ -24,13 +29,16 @@ Number of virtual CPUs (defaults to 2).
 .BI \-m " " memory ", " \-\-memory " " memory
 Memory allocation in MiB (defaults to 2048 MiB).
 .TP
-.BI \-s " " disk ", " \-\-disk " " disk
-Virtual disk size in GiB (defaults to 20 GiB). APFS Copy-on-Write ensures only written blocks consume actual disk space.
+.BI \-d " " disk ", " \-\-disk " " disk
+Virtual disk size in GiB (defaults to 20 GiB). APFS Copy-on-Write ensures only
+written blocks consume actual disk space.
 .RE
 
 .TP
 .BI list ", " ls
-List all configured Linux machines with their distribution, runtime status, CPU/memory usage, and IP addresses.
+List all configured Linux machines with their distribution, runtime status,
+configured CPU/memory/disk allocations, and IP addresses. Protected system
+machines require \fB--system\fR or \fB--all\fR.
 
 .TP
 .BI start " [" name "]"
@@ -38,19 +46,22 @@ Boot a stopped virtual machine into the background.
 
 .TP
 .BI stop " [" name "] [" \-\-force "]"
-Gracefully shut down a running machine (or immediately terminate with \fB\-\-force\fR).
+Gracefully shut down a running machine (or immediately terminate with
+\fB\-\-force\fR).
 
 .TP
 .BI restart " [" name "]"
 Restart a running virtual machine.
 
 .TP
-.BI delete ", " rm " [" name "] [" \-\-force "]"
+.BI delete " " name " [" \-\-yes "]"
 Delete a virtual machine and its associated APFS disk image.
 
 .TP
 .BI clone " " source " " target
-Instantly clone a machine using native APFS Copy-on-Write. Takes less than 1 millisecond and consumes zero additional disk space until modified.
+Clone a stopped machine using APFS Copy-on-Write where supported, with a
+file-copy fallback. Shared disk blocks consume additional space as they are
+modified; metadata and other copied files also require space.
 
 .TP
 .BI rename " " old_name " " new_name
@@ -58,11 +69,13 @@ Rename an existing machine.
 
 .TP
 .BI info " [" name "]"
-Display detailed JSON or tabular metadata for a machine (IP address, MAC address, vCPUs, RAM, disk allocation, APFS physical footprint).
+Display human-readable metadata for a machine (IP address, MAC
+address, vCPUs, RAM, disk allocation, APFS physical footprint).
 
 .TP
-.BI top " [" interval "]"
-Interactive live terminal dashboard displaying guest CPU usage, resident memory (RSS), APFS CoW disk savings, and host resource utilization.
+.BI top " [" \-\-interval " " seconds "]"
+Interactive live terminal dashboard displaying host VMM process CPU usage,
+resident memory (RSS), APFS CoW disk savings, and host resource utilization.
 
 .TP
 .BI ssh " [" name "]"
@@ -78,24 +91,29 @@ Copy files or directories from the Linux guest to macOS.
 
 .TP
 .BI export " " machine " " output_archive
-Export a machine's disk and metadata to a compressed \fB.tar.gz\fR archive.
+Export a stopped machine as a raw disk file and a separate JSON
+\fB.mach-meta\fR sidecar. Keep both files to preserve machine configuration.
 
 .TP
-.BI import " " input_archive " [" name "]"
-Import a previously exported machine archive.
+.BI import " " input_disk " " name
+Import a raw disk file under the required machine name, reading its
+configuration sidecar if present.
 
 .TP
 .BI default " [" name "]"
 Get or set the active default machine used by \fBmach\fR.
 
 .TP
-.BI mount " [" name "] [" path "]"
-Mount a Linux machine's filesystem or open it in macOS Finder (\fB~/Mach/machines/<name>\fR).
+.BI mount " " name " [" path "]"
+Mount a Linux machine's filesystem or open it in macOS Finder
+(\fB~/Mach/machines/<name>\fR).
 
 .SH CONTAINER & KUBERNETES COMMANDS
 .TP
 .BI docker " start [" \-\-system "]"
-Start the Docker engine inside the system infrastructure VM and configure the macOS Docker CLI context. With \fB\-\-system\fR, creates a system-wide symlink at \fB/var/run/docker.sock\fR.
+Start the Docker engine inside the system infrastructure VM and configure the
+macOS Docker CLI context. With \fB\-\-system\fR, creates a system-wide symlink
+at \fB/var/run/docker.sock\fR.
 .TP
 .BI docker " stop"
 Stop the Docker engine and terminate background socket forwarding.
@@ -111,7 +129,9 @@ Display current Docker daemon status and API responsiveness.
 
 .TP
 .BI k8s " enable"
-Provision and start a dedicated, zero-overhead Kubernetes (K3s) cluster. Automatically configures \fB~/.kube/config\fR.
+Provision and start K3s in the shared infrastructure VM using its own
+containerd. Docker images are not automatically shared with this runtime.
+Automatically configures \fB~/.kube/config\fR.
 .TP
 .BI k8s " disable"
 Disable the local Kubernetes cluster and terminate API forwarding.
@@ -127,20 +147,24 @@ Display Kubernetes cluster health and node status.
 
 .TP
 .BI debug " " container_name
-Drop an interactive debugging shell into a Docker container with preloaded networking and diagnostic utilities.
+Drop an interactive debugging shell into a Docker container with preloaded
+networking and diagnostic utilities.
 
 .SH NETWORKING & SYSTEM COMMANDS
 .TP
 .BI doctor
-Run comprehensive health checks on virtualization hardware, entitlements, APFS CoW support, SSH keys, Docker sockets, and DNS resolvers.
+Run comprehensive health checks on virtualization hardware, entitlements, APFS
+CoW support, SSH keys, Docker sockets, and DNS resolvers.
 
 .TP
-.BI dns " setup"
-Configure the native macOS resolver for \fB*.mach.local\fR domains via \fB/etc/resolver/mach.local\fR.
+.BI dns " enable | disable | status"
+Configure the native macOS resolver for \fB*.mach.local\fR domains via
+\fB/etc/resolver/mach.local\fR.
 
 .TP
 .BI tls " install [" \-\-system "]"
-Generate and trust a local wildcard TLS certificate authority in the macOS Keychain for trusted HTTPS across browsers and curl.
+Generate and trust a local wildcard TLS certificate authority in the macOS
+Keychain for trusted HTTPS across browsers and curl.
 
 .TP
 .BI daemon " start | stop | status"
@@ -148,7 +172,9 @@ Manage the background async port forwarding and DNS routing daemon.
 
 .TP
 .BI uninstall " [" \-\-all "] [" \-\-force "] [" \-\-keep\-data "]"
-Completely uninstall Mach, stop all VMs and daemons, reset Docker and Kubernetes contexts, restore ~/.ssh/config, remove TLS certificates, and clean up ~/.mach data.
+Completely uninstall Mach, stop all VMs and daemons, reset Docker and
+Kubernetes contexts, restore ~/.ssh/config, remove TLS certificates, and clean
+up ~/.mach data.
 
 .TP
 .BI version
@@ -157,9 +183,9 @@ Print version, build profile, and target architecture.
 .SH EXAMPLES
 .TP
 .B Create an Ubuntu machine with 4 vCPUs and 4 GB RAM
-machctl create --distro ubuntu --cpus 4 --memory 4096 dev-box
+machctl create ubuntu dev-box --cpus 4 --memory 4096
 .TP
-.B Instant APFS CoW clone of an existing machine
+.B Clone a stopped machine
 machctl clone dev-box dev-box-backup
 .TP
 .B Launch Kubernetes cluster

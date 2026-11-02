@@ -4,54 +4,20 @@ Welcome, AI Coding Agent! This document is the definitive guide for developing, 
 
 ---
 
-## 1. Project Vision & Core Philosophy
+## 1. Project Vision and Verified Architecture
 
-**Mach** is a lightweight, zero-overhead macOS virtualization and container engine written in **Rust**, designed as a fast, native, open-source replacement for **OrbStack** and Docker Desktop on Apple Silicon.
+Mach provides Linux VMs and container integration for Apple Silicon through Rust and Objective-C bindings to Apple's Virtualization.framework. Low overhead, fast startup, and OrbStack interface parity are goals, not established measurements or completed feature claims. Do not publish numeric performance or competitor comparisons without reproducible measurements and sources.
 
-### Core Tenets:
-1. **Pure CLI-First & Zero Bloat**: No heavy Electron GUI, no bloated background runtimes. Ultra-minimal memory footprint (< 15 MB) and sub-second startup times.
-2. **Apple Silicon Native**: Powered by Apple `Virtualization.framework` (`VZVirtualMachine`), APFS Copy-on-Write (CoW) disk cloning, and Apple Silicon Rosetta 2 for Linux (`VZLinuxRosettaDirectoryShare`).
-3. **OrbStack Feature & CLI Parity**:
-   - `mach` (short daily driver command): Drops into interactive shell, executes transparent commands on Linux (`mach uname -a`), or manages machines.
-   - `machctl` (administration CLI): Comprehensive control plane mirroring `orbctl`.
-   - Standard macOS `docker` CLI drop-in context `mach` pointing to `~/.mach/run/docker.sock`.
-4. **Real-Deal Verification (Zero Mocking / No Superficial Tests)**: Never claim a feature is done without booting real VMs, pinging NAT, checking dynamic port forwarding, and observing exit codes in the terminal.
+Implemented components include VirtioFS host sharing, APFS clone attempts with copy fallbacks, SSH guest execution, a Docker socket tunnel, a background port forwarder and DNS/proxy services, and optional K3s. Their presence in source does not establish live correctness: verify the relevant behavior on real VMs.
 
----
+Docker and K3s use the protected `mach-system` infrastructure VM, with separate dockerd and K3s containerd image stores. Docker builds are not automatically available to Kubernetes. The host bridge listens on `0.0.0.0:32222` and validates peers; it is not a localhost-only listener. Host `/Users` sharing exposes host files to guest commands.
 
-## 2. Modern Architectural Stance vs. Legacy Approaches (Feature Parity + Common Interface)
+## 2. Interface Contract
 
-A guiding directive for Mach is: **Achieve 100% feature and developer interface parity with OrbStack, but do not copy OrbStack's internal implementation if a cleaner, more modern, or more native approach exists.**
-
-### The Modern vs. Legacy Architectural Matrix
-
-| Capability | Legacy / OrbStack Approach | Mach Modern Native Approach | Why Mach's Approach is Better |
-| :--- | :--- | :--- | :--- |
-| **Virtualization Framework** | Proprietary closed-source Swift/C++ hypervisor wrapper | Native Apple `Virtualization.framework` (`VZVirtualMachine`) in Rust/Obj-C | 100% open-source, official Apple Silicon support, zero proprietary lock-in, ultra-low overhead (<15 MB footprint). |
-| **Linux Containers on macOS** | Proprietary VM running closed Linux system runtime | Standard Linux VM kernel running OCI runtime (`containerd` / `dockerd`) | True Linux container semantics (cgroups v2, namespaces, overlayfs) managed through standard OCI tools rather than black-box daemons. |
-| **x86_64 Emulation (Rosetta 2)** | Custom binfmt wrappers / QEMU translation | First-party `VZLinuxRosettaDirectoryShare` mounted via VirtioFS with kernel `binfmt_misc` | Hardware-accelerated memory model (TSO) on Apple Silicon; near-native x86_64 performance inside Linux Docker containers. |
-| **Disk Storage & Snapshotting** | Custom sparse bundle formats or block copies | Native **APFS Copy-on-Write (CoW)** via `clonefile` / `/bin/cp -c` | Sub-millisecond instant cloning without duplicating disk bytes; shared blocks until written; native APFS compression. |
-| **Host Directory Sharing** | Custom 9P / proprietary VirtioFS server | First-party Apple VirtioFS (`VZVirtioFileSystemDeviceConfiguration`) with 1:1 `/Users` path parity | Native Darwin kernel page caching; zero path translation overhead; seamless editing in macOS IDEs. |
-| **Local DNS & Domains** | Proprietary system DNS hijacking | Async Tokio UDP responder on `127.0.0.1:5354` + native `/etc/resolver/mach.local` | Leverages macOS native resolver framework without modifying `/etc/hosts` or interfering with system DNS daemons. |
-| **Dynamic Port Forwarding** | Proprietary background daemon | Async Tokio port forwarder polling Docker socket events and binding `127.0.0.1:PORT` | Zero root/sudo daemon requirements; dynamically binds and unbinds container ports in user space. |
-| **Host Command Bridge** | Custom IPC bridge | Native bidirectional TCP bridge on localhost (port 32222) handling `mac open`, `mac pbcopy`, `mac pbpaste` | Lightweight, robust, standard protocol easily scriptable from any Linux shell. |
-| **System Overhead** | Background menu bar GUI app (~50–100 MB RAM) | Pure CLI-first binary + headless Tokio background daemon (<15 MB RAM) | Starts instantly (<0.5s), consumes negligible battery, operates seamlessly in headless/CI and SSH terminal environments. |
-
-### Preserving the Common Interface (Developer Ergonomics)
-
-While the internals are modern, native, and open-source, the external user experience matches developer muscle memory 1:1:
-1. **Short Daily Driver (`mach`)**:
-   - `mach` $\rightarrow$ Interactive shell in default machine.
-   - `mach uname -a` $\rightarrow$ Transparent command execution in Linux.
-   - `mach -m <machine> -u root <cmd>` $\rightarrow$ Machine and user flags.
-2. **Management Plane (`machctl`)**:
-   - Complete subcommands matching `orbctl`: `create`, `list`, `start`, `stop`, `delete`, `clone`, `rename`, `info`, `inspect`, `dump`, `top`, `debug`, `export`, `import`, `push`, `pull`, `doctor`, `k8s`, `docker`, `config`, `daemon`, `dns`, `tls`.
-3. **Standard Docker Context**:
-   - `docker --context mach ps` / `docker context use mach` pointing to `~/.mach/run/docker.sock`.
-   - Optional legacy symlink at `/var/run/docker.sock` for VS Code Dev Containers and Testcontainers via `machctl docker setup --system`.
-4. **Networking**:
-   - Container domain routing: `http://<machine>.mach.local` and `http://<container>.mach.local`.
-   - Direct published ports: `curl http://localhost:<port>`.
+- `mach` opens a Linux shell or runs a guest command. Reserve only daily lifecycle verbs (`start`, `stop`, `restart`, `shell`, `create`, `delete`, `list`/`ls`) and `menu`, alongside help/version handling.
+- Administration belongs to `machctl`. `mach docker ...` always means the guest Docker executable; `machctl docker ...` manages the infrastructure engine.
+- Use host `docker --context mach ...` with `~/.mach/run/docker.sock` for the infrastructure Docker engine. Optional `machctl docker start --system` configures the legacy system socket and may require privileges.
+- Local domains and published Docker ports depend on daemon, resolver, tunnel, and guest service health. Do not promise universal domain or port availability from configuration alone.
 
 ---
 
@@ -63,12 +29,12 @@ mach/
 ├── entitlements.plist          # macOS codesigning entitlements (Hypervisor + Virtualization)
 ├── install.sh                  # Build, install to ~/.cargo/bin, and codesign script
 ├── tests/
-│   ├── test_cli_primitives.sh  # 32 CLI assertions (lifecycle, config, export/import, push/pull)
-│   └── test_real_deal.sh       # 17 live virtualization integration tests (boot, NAT, Rosetta, Docker)
+│   ├── test_cli_primitives.sh  # CLI regression assertions (inspect script for current scope)
+│   └── test_real_deal.sh       # Live VM integration checks (boot, NAT, Rosetta, Docker)
 ├── assets/                     # Minimal Linux kernel, icons, & Alpine initrd assets
 ├── crates/
 │   ├── mach-common/            # Shared types, machine metadata, config, APFS CoW utilities
-│   │   ├── src/config.rs       # MachConfig (~/.mach/config.json)
+│   │   ├── src/config.rs       # MachConfig (~/.mach/config.yaml; legacy JSON migration)
 │   │   ├── src/machine.rs      # Machine struct, MachineState enum, persistence
 │   │   └── src/error.rs        # Typed errors
 │   ├── mach-vmm/               # Low-level macOS virtualization engine
@@ -81,7 +47,7 @@ mach/
 │       ├── src/commands/       # Subcommand handlers (create, list, start, stop, delete, run_cmd, etc.)
 │       ├── src/ssh.rs          # Dedicated SSH key management (~/.mach/ssh/id_ed25519)
 │       ├── src/cloud_init.rs   # NoCloud cidata.iso generator using native hdiutil
-│       ├── src/images.rs       # Curated cloud image catalog & streaming decompressor
+│       ├── src/images.rs       # Curated cloud image catalog & image download and decompression
 │       ├── src/dns.rs          # Async UDP DNS responder on 127.0.0.1:5354 (*.mach.local)
 │       ├── src/port_forward.rs # Async dynamic port forwarder for published container ports
 │       ├── src/proxy.rs        # HTTP/HTTPS reverse proxy for container domain routing
@@ -99,7 +65,7 @@ Apple Silicon hypervisor frameworks strictly require specific entitlements. Runn
   ```bash
   ./install.sh
   ```
-- Or manually sign the binary:
+- For focused local validation, manually sign the binary (the complete release still requires `./install.sh`):
   ```bash
   codesign --force --entitlements entitlements.plist --sign - target/release/mach
   ```
@@ -120,13 +86,11 @@ Do **NOT** assume code works just because `cargo check` passes.
 - Do not leave dirty untracked files or abandoned test machines lying around.
 - Regularly inspect `git status` and commit completed work with clean, conventional commit messages.
 
-### Rule 4: Clean Up Test State
-- Never leave orphan hypervisor processes running. Clean up using:
-  ```bash
-  mach stop --force >/dev/null 2>&1 || true
-  killall -9 mach 2>/dev/null || true
-  ```
-- Ensure test machines (`real-alp`, `real-deb`, `test-deb`, etc.) are deleted after test suites complete.
+### Rule 4: Clean Up Only Task-Owned State
+- Record pre-existing machines, services, and processes before live tests.
+- Use unique test names and stop/delete only machines created by this task.
+- Never use blanket `killall mach`, broad `pkill`, or delete user machines as test cleanup.
+- Preserve logs and report failures before removing task-owned state. Restore services to their prior state where practical.
 
 ### Rule 5: Strict Separation of `mach` vs `machctl` (Commands in ONE Place Only — NEVER Duplicate!)
 Commands must live in **ONE place and one place only**. Never duplicate commands across both `mach` and `machctl`.
@@ -139,7 +103,7 @@ Commands must live in **ONE place and one place only**. Never duplicate commands
   - All control plane, system diagnostics, inspection, and administration tools live exclusively here:
     `inspect`, `dump`, `info`, `top`, `doctor`, `config`, `daemon`, `dns`, `tls`, `k8s`, `docker`, `mount`, `code`, `link`, `debug`, `export`, `import`, `clone`, `rename`.
 - **If a control plane command is invoked via `mach`** (e.g. `mach inspect` or `mach dump`):
-  - `mach` must NOT execute it. It must print a clear, polite error redirecting the user to `machctl <command>`.
+  - `mach` must NOT execute the host administration operation. It should direct the user to `machctl <command>`. Guest Docker commands are always passed through to the selected guest.
 
 ### Rule 6: Strictly Follow SemVer & Display Version Discretely
 - Every patch/change must increment the minor version (e.g. `0.1.0` -> `0.2.0` -> `0.3.0`).
@@ -155,7 +119,7 @@ Whenever implementing a solution, bug fix, or feature in Mach, you MUST complete
 1. **Update Package & Bump Minor SemVer**:
    - Increment minor version in `Cargo.toml` (e.g. `0.14.0` -> `0.15.0`).
    - Sync `man/man1/mach.1` and `man/man1/machctl.1` headers.
-   - Run `./install.sh` to compile, codesign with Apple Silicon entitlements, update `~/.cargo/bin`, package distribution archives (`dist/mach-<VERSION>-aarch64-apple-darwin.tar.gz`), and synchronize `Formula/mach.rb` + `Casks/mach.rb`.
+   - Run `./install.sh` to compile, codesign with Apple Silicon entitlements, update `~/.cargo/bin`, package distribution archives (`dist/mach-<VERSION>-aarch64-apple-darwin.tar.gz`), and update `Formula/mach.rb` + `Casks/mach.rb`. Local Homebrew tap synchronization is an explicit `./install.sh --sync-tap` step; publishing the release archive is separate. Verify the published URL and checksum before reinstalling from it.
 
 2. **Verify Tests**:
    - Ensure unit tests (`cargo test --workspace`) and CLI primitives (`./tests/test_cli_primitives.sh`) pass 100%.
@@ -164,13 +128,14 @@ Whenever implementing a solution, bug fix, or feature in Mach, you MUST complete
    - Stage all modified crates, manpages, and the newly generated distribution archive.
    - Commit with a clean, conventional commit message:
      ```bash
-     git add -A && git commit -m "feat/fix: <description> (v<VERSION>)"
+     git add <reviewed-task-files> && git commit -m "fix: <description> (v<VERSION>)"
      ```
 
 4. **Push to Remote**:
-   - Always push commits and tags to the remote repository so the origin is kept in sync:
+   - Push the reviewed release commit and release tag. Check the target branch and remote first; do not overwrite unrelated work:
      ```bash
      git push origin main
+     git push origin v<VERSION>
      ```
 
 5. **Brew Reinstall & System Refresh (CLI + Menu Bar)**:
@@ -178,11 +143,7 @@ Whenever implementing a solution, bug fix, or feature in Mach, you MUST complete
      ```bash
      brew reinstall --cask mach
      ```
-   - Restart the menu bar status item if it was running:
-     ```bash
-     pkill -f "mach menu" 2>/dev/null || true
-     mach menu > ~/.mach/logs/menu.log 2>&1 &
-     ```
+   - If the menu bar was running, restart only its identified process and verify the replacement displays the release version. Do not start it on a previously headless installation.
    - Verify the installed version in terminal:
      ```bash
      mach --version && machctl --version
@@ -208,12 +169,12 @@ Whenever implementing a solution, bug fix, or feature in Mach, you MUST complete
 ### 3. Smart Machine Defaults
 - Default Linux distro: `ubuntu` (if omitted in `mach create`).
 - Auto-naming: If `name` is omitted, use the distro name. If taken, auto-increment (`fedora` -> `fedora-2` -> `fedora-3`).
-- Auto-default tracking: The first created machine is automatically saved as `default_machine` in `~/.mach/config.json`.
+- Auto-default tracking: The first created machine is automatically saved as `default_machine` in `~/.mach/config.yaml`.
 - When a machine is deleted, if it was the default machine, clear `default_machine = None`.
 
 ### 4. Docker Socket & Forwarding
 - Linux guest VM runs `dockerd` at `/var/run/docker.sock`.
-- `mach start` and `mach docker setup` establish an SSH background tunnel:
+- `machctl docker start` establishes the infrastructure Docker SSH background tunnel:
   ```bash
   ssh -f -nNT -L ~/.mach/run/docker.sock:/var/run/docker.sock root@<guest-ip>
   ```
@@ -238,8 +199,8 @@ Whenever implementing a solution, bug fix, or feature in Mach, you MUST complete
 | **List Machines** | `mach ls` or `machctl list` |
 | **Start / Stop Machine** | `mach start <name>` / `mach stop <name>` |
 | **Open Linux Shell** | `mach` (default machine) or `mach shell <name>` |
-| **Transparent Command Execution** | `mach uname -a` or `mach run <name> uname -a` |
-| **Docker Context Setup** | `mach docker setup` |
+| **Guest Command Execution** | `mach uname -a` or `mach -m <name> uname -a` |
+| **Docker Context Setup** | `machctl docker start` |
 | **Health Check** | `machctl doctor` |
 | **Inspect Machine Specs (YAML/JSON)** | `machctl inspect <name>` / `machctl inspect <name> --json` |
 | **Dump Raw Machine Config (YAML/JSON)** | `machctl dump <name>` / `machctl dump <name> --json` |

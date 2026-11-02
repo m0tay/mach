@@ -1,8 +1,8 @@
 class Mach < Formula
   desc "Supersonic Linux virtualization & container engine for Apple Silicon"
-  homepage "https://github.com/douglaslobo/mach"
-  url "file:///Users/douglaslobo/Developer/mach/dist/mach-0.14.0-aarch64-apple-darwin.tar.gz"
-  sha256 "f2666ca7d568c22fbfe679012e92489be59492405487ab0186ae2c5120cff3dd"
+  homepage "https://github.com/m0tay/mach"
+  url "https://github.com/m0tay/mach/releases/download/v0.15.0/mach-0.15.0-aarch64-apple-darwin.tar.gz"
+  sha256 "e64d1f429a954fc5114c1dc3530ad5660c53e5d39bfc150130b55ca45e66aa09"
   license "MIT"
 
   depends_on arch: :arm64
@@ -25,23 +25,25 @@ class Mach < Formula
     # Codesign with hypervisor and virtualization entitlements
     system "codesign", "--force", "--entitlements", "entitlements.plist", "--sign", "-", bin/"mach"
 
-    generate_completions_from_executable(bin/"mach", "completion")
+    bash_completion.install "completions/mach.bash"
+    zsh_completion.install "completions/_mach", "completions/_machctl"
+    fish_completion.install "completions/mach.fish"
   end
 
-  def post_install_steps
+  def post_install
     # Initialize Mach environment, configs, keys, contexts safely without overwriting user data
-    system bin/"mach", "init", "--non-interactive"
+    system bin/"machctl", "init", "--non-interactive"
   end
 
   def caveats
     <<~EOS
-      ⚡️ mach is initialized and ready on your Apple Silicon Mac!
+      Mach is installed for your Apple Silicon Mac.
 
       Quickstart:
         • Open Linux shell:         mach
         • Run Linux commands:       mach uname -a
-        • Docker containers:        docker ps
-        • Kubernetes cluster:       kubectl get nodes
+        • Start Docker:              machctl docker start
+        • Enable Kubernetes:         machctl k8s enable
         • Activity dashboard:       machctl top
         • Open files in Finder:     open ~/Mach
         • macOS Menu bar:           mach menu

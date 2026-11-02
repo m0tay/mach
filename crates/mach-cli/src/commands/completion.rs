@@ -47,29 +47,12 @@ pub fn detect_active_shell() -> Option<Shell> {
 
 /// Generate shell completion script bytes for the given shell, including machctl aliases.
 pub fn generate_shell_script(shell: Shell) -> Vec<u8> {
-    let mut cmd = Cli::command();
     let mut buf = Vec::new();
-    generate(shell, &mut cmd, "mach", &mut buf);
-
-    // Also register completion for machctl so that both CLI entrypoints benefit
-    match shell {
-        Shell::Zsh => {
-            buf.extend_from_slice(
-                b"\n# Enable completions for machctl as well\nif (( $+functions[compdef] )); then\n    compdef _mach machctl 2>/dev/null || true\nfi\n",
-            );
-        }
-        Shell::Bash => {
-            buf.extend_from_slice(
-                b"\n# Enable completions for machctl as well\nif type complete >/dev/null 2>&1; then\n    complete -F _mach -o bashdefault -o default machctl 2>/dev/null || true\nfi\n",
-            );
-        }
-        Shell::Fish => {
-            buf.extend_from_slice(
-                b"\n# Enable completions for machctl as well\ncomplete -c machctl -w mach\n",
-            );
-        }
-        _ => {}
+    if shell == Shell::Zsh {
+        buf.extend_from_slice(b"#compdef mach machctl\n");
     }
+    generate(shell, &mut crate::cli::mach_command(), "mach", &mut buf);
+    generate(shell, &mut Cli::command().name("machctl"), "machctl", &mut buf);
 
     buf
 }
@@ -246,7 +229,7 @@ pub fn generate_completion(shell_str: &str, install: bool) -> Result<()> {
             }
             other => {
                 bail!(
-                    "Direct installation is not supported for '{other}'. Use `mach completion {other}` to output completion script."
+                    "Direct installation is not supported for '{other}'. Use `machctl completion {other}` to output completion script."
                 );
             }
         }

@@ -196,7 +196,7 @@ pub fn start_daemon() -> Result<()> {
         return Ok(());
     }
 
-    let exe = std::env::current_exe()?;
+    let exe = std::env::current_exe()?.with_file_name("machctl");
     let log_file = fs::OpenOptions::new()
         .create(true)
         .append(true)

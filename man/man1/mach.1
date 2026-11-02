@@ -1,23 +1,28 @@
-.TH MACH 1 "October 2026" "Mach 0.14.0" "Mach Manual"
+.TH MACH 1 "November 2, 2026" "Mach 0.15.0" "Mach Manual"
 .SH NAME
-mach \- supersonic, lightweight Linux virtualization and command runner for macOS Apple Silicon
+mach \- Linux virtualization and command runner for macOS Apple Silicon
 .SH SYNOPSIS
 .B mach
 .br
 .B mach
-[\fB\-m\fR \fImachine\fR] [\fB\-u\fR \fIuser\fR] [\fB\-w\fR \fIdir\fR] \fIcommand\fR [\fIargs...\fR]
+[\fB\-m\fR \fImachine\fR] [\fB\-u\fR \fIuser\fR] [\fB\-w\fR \fIdir\fR]
+\fIcommand\fR [\fIargs...\fR]
 .br
 .B mach
 \fIsubcommand\fR [\fIargs...\fR]
 .SH DESCRIPTION
 .B mach
-is a lightweight, zero-overhead Linux virtualization and container engine designed specifically for Apple Silicon Macs. Written in Rust and powered by Apple's native \fBVirtualization.framework\fR, Mach starts full Linux environments in under one second with less than 15 MB host memory overhead.
+runs Linux virtual machines on Apple Silicon using Apple's
+\fBVirtualization.framework\fR through Rust and Objective-C. First use may
+download an image, create a disk, boot Linux, and wait for SSH. Performance
+depends on the host and guest workload.
 
 \fBmach\fR can be used in three distinct ways:
 
 .TP
 .B 1. Interactive Linux Shell
-Running \fBmach\fR with no arguments opens an interactive login shell inside the default Linux machine.
+Running \fBmach\fR with no arguments opens an interactive login shell inside
+the default Linux machine.
 .PP
 .RS
 .nf
@@ -29,7 +34,9 @@ Linux debian 6.1.0-53-cloud-arm64 #1 SMP aarch64
 
 .TP
 .B 2. Transparent Command Execution
-Prefix any command with \fBmach\fR to execute it transparently inside the guest Linux environment, streaming output, exit codes, and signals directly back to your macOS terminal.
+Prefix a guest command with \fBmach\fR to execute it through SSH. Local
+lifecycle verbs are reserved. Output and the remote command exit status are
+returned to the terminal; SSH transport failures can return status 255.
 .PP
 .RS
 .nf
@@ -41,7 +48,10 @@ $ mach -m debian -u root apt update
 
 .TP
 .B 3. Machine & Subsystem Management
-Any \fBmachctl\fR administration subcommand can be invoked directly through \fBmach\fR.
+Basic lifecycle verbs are reserved by \fBmach\fR: start, stop, restart, shell,
+create, delete, list (ls), and menu. Use \fBmachctl\fR for administration. In
+particular, \fBmach docker\fR executes the guest Docker CLI; it does not
+manage the host integration.
 .PP
 .RS
 .nf
@@ -55,13 +65,18 @@ $ machctl k8s enable
 .SH OPTIONS
 .TP
 .BI \-m " " machine ", " \-\-machine " " machine
-Specify the target Linux virtual machine (defaults to the configured default machine, or the first running machine).
+Specify the target Linux virtual machine (defaults to the configured default
+machine, or the first running machine).
 .TP
 .BI \-u " " user ", " \-\-user " " user
-Specify the guest username to run the command as (e.g., \fIroot\fR, \fIdebian\fR, \fIubuntu\fR).
+Specify the guest username to run the command as (e.g., \fIroot\fR,
+\fIdebian\fR, \fIubuntu\fR).
 .TP
 .BI \-w " " dir ", " \-\-workdir " " dir
 Set the working directory inside the guest VM before executing the command.
+Failure to enter an explicitly selected directory fails the command. By
+default, a host working directory under /Users is used when it exists in the
+guest; otherwise the guest home directory is used.
 .TP
 .B \-h\fR, \fB\-\-help
 Print summary help and options.
@@ -69,19 +84,33 @@ Print summary help and options.
 .B \-V\fR, \fB\-\-version
 Print the Mach version number.
 
+.SH COMMAND ARGUMENTS
+Use \fBmach -- command args...\fR to bypass local command routing for a guest
+executable with a reserved name. Arguments are passed literally through SSH.
+For guest shell expansion, invoke a shell explicitly, for example \fBmach sh
+-c 'printf "%s\\n" "$HOME"'\fR. Machine selection uses \fB-m\fR; a leading
+command argument is not interpreted as a machine name. Interactive terminals
+request an SSH PTY; redirected input/output uses a non-PTY session.
+
 .SH ENVIRONMENT & FILE SHARING
 .TP
 .B /Users Parity
-The entire macOS \fB/Users\fR hierarchy is shared directly into the Linux guest via Apple VirtioFS at \fB/Users\fR, providing 1:1 path parity and sub-millisecond I/O latency.
+The entire macOS \fB/Users\fR hierarchy is shared directly into the Linux
+guest via Apple VirtioFS at \fB/Users\fR, providing matching host and guest
+paths. Guest commands can access shared host files.
 .TP
 .B Dynamic Port Forwarding
-Container ports exposed inside the guest VM are automatically bound on macOS localhost (\fB127.0.0.1\fR) in user space without requiring root privileges.
+Container ports exposed inside the guest VM are automatically bound on macOS
+localhost (\fB127.0.0.1\fR) in user space without requiring root privileges.
 .TP
 .B Local DNS Routing
-All guest machines and Docker containers are accessible through the local \fB*.mach.local\fR domain via the built-in async DNS responder.
+Machine and container domain integration uses the local \fB*.mach.local\fR
+domain through the background responder and macOS resolver configuration.
+Availability depends on service health and the target workload.
 .TP
 .B Rosetta 2 Translation
-Intel \fBx86_64\fR binaries and Linux containers run seamlessly on Apple Silicon via hardware-accelerated Rosetta 2 for Linux (\fBdocker run --platform linux/amd64\fR).
+Intel \fBx86_64\fR binaries and Linux containers can use Apple Rosetta 2 for
+Linux when available and configured (\fBdocker run --platform linux/amd64\fR).
 
 .SH EXAMPLES
 .TP
@@ -95,10 +124,10 @@ mach uname -m
 mach -m fedora -u root dnf install -y htop
 .TP
 .B Monitor resources in real-time
-mach top
+machctl top
 .TP
 .B Configure Docker CLI context
-mach docker setup
+machctl docker start
 
 .SH SEE ALSO
 .BR machctl (1),

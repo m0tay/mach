@@ -65,6 +65,47 @@ pub fn new_ssh_command(ip: &IpAddr, user: &str) -> Command {
     cmd
 }
 
+/// Quote one argument for the POSIX shell used by OpenSSH on the guest.
+pub fn quote_argument(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+/// Build a remote shell script without allowing arguments to become shell syntax.
+/// An explicit directory must exist; an unavailable shared host directory falls back to HOME.
+pub fn session_script(command: &[String], workdir: Option<&str>) -> Result<String> {
+    let directory = if let Some(dir) = workdir {
+        format!("cd -- {} || exit $?; ", quote_argument(dir))
+    } else {
+        let cwd = std::env::current_dir()?;
+        match cwd.to_str().filter(|dir| *dir == "/Users" || dir.starts_with("/Users/")) {
+            Some(dir) => format!("if [ -d {} ]; then cd -- {} || exit $?; fi; ", quote_argument(dir), quote_argument(dir)),
+            None => String::new(),
+        }
+    };
+    let exec = if command.is_empty() {
+        "exec \"${SHELL:-/bin/sh}\" -l".to_string()
+    } else {
+        format!("exec {}", command.iter().map(|arg| quote_argument(arg)).collect::<Vec<_>>().join(" "))
+    };
+    Ok(format!("{directory}{exec}"))
+}
+
+/// Interactive commands get a PTY only when both input and output are terminals.
+/// Pipelines keep separate stdout/stderr and byte-preserving input/output.
+pub fn new_session_command(ip: &IpAddr, user: &str) -> Command {
+    use std::io::IsTerminal;
+    let mut cmd = Command::new("ssh");
+    cmd.args(mach_ssh_args());
+    cmd.arg("-o").arg("IdentitiesOnly=yes");
+    if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+        cmd.arg("-t");
+    } else {
+        cmd.arg("-T");
+    }
+    cmd.arg(format!("{user}@{ip}"));
+    cmd
+}
+
 /// Mach managed SSH configuration block.
 pub const MACH_SSH_CONFIG_BLOCK: &str = "\
 # BEGIN MACH MANAGED BLOCK - DO NOT EDIT MANUALLY
@@ -279,6 +320,25 @@ pub fn remove_mach_ssh_config_from_dir(ssh_dir: &std::path::Path) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_shell_preserves_argument_bytes() {
+        let values = ["", "a b", "single'quote", "double\"quote", "$HOME", "$(exit 99)", "; exit 98", "*", "line\nbreak", "--help", "日本語"];
+        let mut args = vec!["/usr/bin/printf".to_string(), "%s\\0".to_string()];
+        args.extend(values.iter().map(|s| s.to_string()));
+        let output = Command::new("/bin/sh").arg("-c").arg(session_script(&args, Some("/tmp")).unwrap()).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let expected: Vec<u8> = values.iter().flat_map(|s| s.as_bytes().iter().copied().chain(std::iter::once(0))).collect();
+        assert_eq!(output.stdout, expected);
+    }
+
+    #[test]
+    fn explicit_workdir_failure_does_not_execute_command() {
+        let args = vec!["/bin/echo".to_string(), "should-not-run".to_string()];
+        let output = Command::new("/bin/sh").arg("-c").arg(session_script(&args, Some("/mach-definitely-missing-directory")).unwrap()).output().unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+    }
 
     #[test]
     fn test_update_ssh_config_empty() {

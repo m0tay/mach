@@ -1,4 +1,4 @@
-//! `mach doctor` command (health check & diagnostics).
+//! `machctl doctor` command (health check & diagnostics).
 
 use anyhow::Result;
 use mach_common::config::MachConfig;
@@ -63,7 +63,7 @@ fn check_apfs_cow_capability(target_dir: &std::path::Path) -> bool {
 }
 
 pub async fn run() -> Result<()> {
-    println!("\x1b[1mmach doctor — System Health Check\x1b[0m");
+    println!("\x1b[1mmachctl doctor — Mach v{} System Health Check\x1b[0m", env!("CARGO_PKG_VERSION"));
     println!("───────────────────────────────────────────────────");
 
     let mut all_ok = true;

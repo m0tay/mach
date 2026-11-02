@@ -21,98 +21,16 @@ pub mod ssh;
 pub mod tls;
 
 use cli::{Cli, Commands, ConfigAction, DaemonAction, DnsAction, DockerAction, K8sAction, TlsAction};
-use mach_common::config::MachConfig;
-use mach_common::machine::MachineState;
 
 fn print_mach_help() {
-    println!(r#"mach's short "mach" daily-driver command:
-
-1. Interactive Linux Shell
-   Run "mach" with no arguments to drop into your default Linux machine:
-   Usage: mach
-
-2. Transparent Linux Command Runner
-   Prefix any command with "mach" to execute it directly inside Linux:
-   Usage: mach [flags] <command> [args...]
-   Examples:
-     mach uname -a
-     mach apt update
-     mach python3 -V
-     mach -m debian -u root whoami
-
-3. Machine Lifecycle Verbs
-   Start, stop, and list your Linux machines:
-     mach start [machine]
-     mach stop [machine]
-     mach restart [machine]
-     mach shell [machine]
-     mach create [distro]
-     mach delete <machine>
-     mach list / mach ls
-     mach menu
-
-For the full system control plane, Kubernetes, Docker, activity monitor, and diagnostics, use "machctl":
-  machctl top            # Live APFS & system monitor
-  machctl info <name>    # Detailed machine info
-  machctl inspect <name> # Deep inspection of machine specs (YAML/JSON)
-  machctl dump <name>    # Dump configuration (YAML/JSON)
-  machctl ssh <name>     # Display SSH connection details
-  machctl k8s            # Manage local Kubernetes cluster
-  machctl doctor         # System diagnostics
-  machctl --help         # All control plane commands"#);
+    cli::mach_command().print_help().expect("write help");
+    println!();
 }
 
 fn print_machctl_help() {
-    println!(r#"mach control plane (machctl) — System administration and management.
-
-Use "machctl" for configuring, monitoring, and managing your mach virtualization environment.
-For daily Linux shell and transparent command execution, use "mach".
-
-Usage:
-  machctl [command]
-
-Linux machines:
-  create      Create a new Linux machine
-  list        List all machines (alias: ls)
-  start       Start mach or a machine
-  stop        Stop mach or a machine
-  restart     Restart a machine
-  delete      Delete a machine
-  info        Get detailed info about a machine
-  inspect     Deep inspection of machine specs, network, and features (YAML/JSON)
-  dump        Dump raw machine or system configuration (YAML/JSON)
-  default     Get or set the default machine
-  clone       Clone a machine (APFS instant clone)
-  rename      Rename a machine
-  export      Export machine disk to a file
-  import      Import machine from a raw disk file
-  mount       Mount or open machine filesystem in macOS Finder
-  code        Open VS Code connected to a machine
-  logs        Show boot and system logs for a machine
-  push        Copy files to Linux
-  pull        Copy files from Linux
-  ssh         Show SSH connection details (host, port, keys)
-
-Containers:
-  docker      Manage Docker engine (enable, disable, status, restart)
-  k8s         Manage local Kubernetes (K3s) cluster (enable, disable, status)
-  debug       Debug a Docker container with extra tools
-
-System & Infrastructure:
-  top         Live activity and resource monitor (CPU, Memory, APFS CoW disk)
-  status      Check whether mach and machines are running
-  doctor      Verify hypervisor entitlements, network, and system health
-  config      View or modify mach configuration (~/.mach/config.yaml)
-  daemon      Manage background DNS (*.mach.local) and port forwarder
-  dns         Configure macOS native DNS resolver (enable, disable, status)
-  tls         Manage local wildcard TLS certificates (*.mach.local)
-  menu        Launch native macOS menu bar status item (mach)
-  uninstall   Completely uninstall Mach and clean up all system integration
-  version     Show mach version
-
-Flags:
-  -h, --help      help for machctl
-  -v, --verbose   enable verbose debug logging"#);
+    use clap::CommandFactory;
+    Cli::command().name("machctl").bin_name("machctl").print_help().expect("write help");
+    println!();
 }
 
 #[tokio::main]
@@ -133,49 +51,7 @@ async fn main() -> Result<()> {
             return Ok(());
         }
 
-        // Smart 'mach' zero-args behavior:
-        commands::menu_cmd::ensure_menu_bar_running();
-        let cfg = MachConfig::load()?;
-
-        let machines = commands::load_all_machines(&cfg.machines_dir)?;
-        let user_machines: Vec<_> = machines.iter().filter(|m| !m.is_system()).collect();
-
-        if user_machines.is_empty() {
-            println!("No Linux machine found. Preparing your environment...");
-            commands::setup::run(false).await?;
-            println!("\x1b[1;32m✓\x1b[0m Environment ready!\n");
-
-            let cfg = MachConfig::load()?;
-            let target_name = cfg.default_machine.clone().unwrap_or_else(|| "debian".to_string());
-            return commands::shell::run(Some(&target_name), false, &[]).await;
-        }
-
-        let target_name = if let Some(ref def) = cfg.default_machine {
-            if user_machines.iter().any(|m| &m.config.name == def) {
-                def.clone()
-            } else if let Some(running) = user_machines.iter().find(|m| m.state == MachineState::Running) {
-                running.config.name.clone()
-            } else {
-                user_machines[0].config.name.clone()
-            }
-        } else if let Some(running) = user_machines.iter().find(|m| m.state == MachineState::Running) {
-            running.config.name.clone()
-        } else {
-            user_machines[0].config.name.clone()
-        };
-
-        // If stopped, boot it first
-        let machine = commands::find_machine(&cfg.machines_dir, &target_name)?.unwrap();
-        if machine.state != MachineState::Running {
-            commands::start::run(Some(&target_name)).await?;
-        } else {
-            commands::menu_cmd::ensure_menu_bar_running();
-        }
-
-        // Restore services if active in last session
-        let _ = commands::restore_services_if_needed(&cfg).await;
-
-        return commands::shell::run(Some(&target_name), false, &[]).await;
+        return commands::shell::run(None, false, &[]).await;
     }
 
     // Custom help handler matching OrbStack
@@ -189,169 +65,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Case 2: Subcommand routing
-    let mut effective_args = raw_args.clone();
-
-    if !is_ctl {
-        let first_cmd_idx = raw_args
-            .iter()
-            .skip(1)
-            .position(|arg| arg != "-v" && arg != "--verbose")
-            .map(|i| i + 1);
-
-        if let Some(idx) = first_cmd_idx {
-            let first_arg = &raw_args[idx];
-            // If a user types `mach docker status` or `mach k8s status`, or an administrative action,
-            // or if the guest VM is not running: provide clear, polite guidance pointing to machctl.
-            if first_arg == "docker" || first_arg == "k8s" {
-                let sub = raw_args.get(idx + 1).map(|s| s.as_str());
-                let is_admin = match first_arg.as_str() {
-                    "docker" => matches!(
-                        sub,
-                        Some("status")
-                            | Some("setup")
-                            | Some("start")
-                            | Some("stop")
-                            | Some("restart")
-                            | Some("destroy")
-                            | Some("shell")
-                            | None
-                    ),
-                    "k8s" => matches!(
-                        sub,
-                        Some("status")
-                            | Some("enable")
-                            | Some("disable")
-                            | Some("start")
-                            | Some("stop")
-                            | Some("restart")
-                            | Some("shell")
-                            | None
-                    ),
-                    _ => false,
-                };
-
-                let cfg_res = MachConfig::load();
-                let vm_not_running = if let Ok(ref cfg) = cfg_res {
-                    let vm_name = if first_arg == "docker" {
-                        commands::docker::DOCKER_VM_NAME.to_string()
-                    } else {
-                        commands::k8s::resolve_k8s_machine_name(&cfg.machines_dir)
-                            .unwrap_or_else(|_| commands::k8s::K8S_VM_NAME.to_string())
-                    };
-                    commands::find_machine(&cfg.machines_dir, &vm_name)
-                        .ok()
-                        .flatten()
-                        .map(|m| m.state != MachineState::Running)
-                        .unwrap_or(true)
-                } else {
-                    true
-                };
-
-                if is_admin || vm_not_running {
-                    println!("In mach, 'machctl' manages the macOS virtualization control plane. Use: machctl docker status (or machctl k8s status). 'mach' executes commands directly inside Linux (e.g. 'mach docker ps').\n");
-
-                    if first_arg == "docker" {
-                        match sub {
-                            Some("status") | None => return commands::docker::status().await,
-                            Some("start") | Some("enable") | Some("setup") => {
-                                let system = raw_args.iter().any(|a| a == "--system");
-                                return commands::docker::start(system).await;
-                            }
-                            Some("stop") | Some("disable") => return commands::docker::stop().await,
-                            Some("restart") => return commands::docker::restart().await,
-                            Some("destroy") => {
-                                let force = raw_args.iter().any(|a| a == "-f" || a == "--force" || a == "-y" || a == "--yes");
-                                return commands::docker::destroy(force).await;
-                            }
-                            Some("shell") => return commands::docker::shell().await,
-                            Some("logs") => {
-                                let follow = raw_args.iter().any(|a| a == "-f" || a == "--follow");
-                                return commands::docker::logs(follow, 50).await;
-                            }
-                            _ => {
-                                // Non-admin command (e.g. `mach docker ps` with stopped VM)
-                                // falls through to transparent execution in Linux (run_cmd will auto-start)
-                            }
-                        }
-                    } else if first_arg == "k8s" {
-                        match sub {
-                            Some("status") | None => return commands::k8s::status().await,
-                            Some("enable") | Some("start") => return commands::k8s::enable().await,
-                            Some("disable") | Some("stop") => return commands::k8s::disable().await,
-                            Some("restart") => return commands::k8s::restart().await,
-                            Some("shell") => return commands::k8s::shell().await,
-                            Some("logs") => {
-                                let follow = raw_args.iter().any(|a| a == "-f" || a == "--follow");
-                                return commands::k8s::logs(follow, 50).await;
-                            }
-                            _ => {
-                                // Fall through
-                            }
-                        }
-                    }
-                }
-            }
-
-            // In mach, control plane administrative commands belong exclusively to machctl.
-            // If invoked via mach, provide clean guidance pointing to machctl.
-            // Exception: 'daemon run' is the internal background worker process spawned by start_daemon().
-            let ctl_only_commands = [
-                "doctor", "inspect", "dump", "top", "config", "daemon", "dns", "tls",
-                "mount", "code", "link", "debug", "export", "import", "clone", "rename",
-                "uninstall",
-            ];
-            if ctl_only_commands.contains(&first_arg.as_str()) {
-                if first_arg == "daemon" && raw_args.iter().any(|a| a == "run") {
-                    // Internal daemon worker process spawned by start_daemon() - allow execution!
-                } else {
-                    eprintln!(
-                        "In mach, 'machctl' manages the macOS virtualization control plane.\nUse: machctl {} [options]\n'mach' is reserved for daily Linux shell and command execution (e.g. 'mach uname -a').\n",
-                        first_arg
-                    );
-                    anyhow::bail!("'{first_arg}' is a control plane command. Run 'machctl {first_arg}' instead.");
-                }
-            }
-
-            // In `mach`, only basic machine verbs are intercepted locally;
-            // everything else (inspect, dump, top, ps, uname, apt...) transparently runs in Linux!
-            let mach_machine_commands = [
-                "start", "stop", "restart", "shell", "create", "delete", "list", "ls",
-                "default", "init", "help", "--help", "-h", "version", "--version", "-V",
-                "menu", "run", "setup", "completion", "boot", "run-vm", "update",
-                "info", "status", "logs", "ssh", "push", "pull", "daemon",
-            ];
-
-            let cmd_name = &raw_args[idx];
-            if !mach_machine_commands.contains(&cmd_name.as_str()) {
-                effective_args.insert(idx, "run".to_string());
-            }
-        }
-    } else {
-        // In `machctl`, all control plane commands are recognized
-        let machctl_commands = [
-            "clone", "create", "list", "ls", "start", "stop", "restart", "delete",
-            "default", "export", "import", "rename", "shell", "run", "info",
-            "inspect", "dump",
-            "status", "top", "logs", "ssh", "push", "pull", "docker", "daemon",
-            "dns", "doctor", "config", "version", "update", "boot", "run-vm", "debug",
-            "mount", "code", "k8s", "link", "tls", "completion", "menu", "setup", "init", "uninstall", "help",
-            "--help", "-h", "--version", "-V",
-        ];
-
-        let first_cmd_idx = raw_args
-            .iter()
-            .skip(1)
-            .position(|arg| arg != "-v" && arg != "--verbose")
-            .map(|i| i + 1);
-
-        if let Some(idx) = first_cmd_idx {
-            let cmd_name = &raw_args[idx];
-            if !machctl_commands.contains(&cmd_name.as_str()) {
-                effective_args.insert(idx, "run".to_string());
-            }
-        }
-    }
+    let effective_args = if is_ctl { raw_args.clone() } else { cli::route_mach_args(&raw_args)? };
 
     let cli = Cli::parse_from(effective_args);
 
@@ -416,9 +130,10 @@ async fn main() -> Result<()> {
             machine,
             user,
             system,
+            workdir,
             command,
         } => {
-            commands::run_cmd::run(machine.as_deref(), user.as_deref(), system, &command).await?;
+            commands::run_cmd::run(machine.as_deref(), user.as_deref(), system, workdir.as_deref(), &command).await?;
         }
         Commands::Ssh {
             name,

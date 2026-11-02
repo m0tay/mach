@@ -1,100 +1,95 @@
 #!/usr/bin/env bash
+# Build a signed local install and the portable Homebrew release archive.
 set -euo pipefail
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+SYNC_TAP=false
+case "${1:-}" in
+    "") ;;
+    --sync-tap) SYNC_TAP=true ;;
+    *) echo "Usage: $0 [--sync-tap]" >&2; exit 2 ;;
+esac
+[[ $# -le 1 ]] || { echo "Too many arguments" >&2; exit 2; }
+[[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || {
+    echo "Mach release packaging requires macOS on Apple Silicon." >&2; exit 1;
+}
+VERSION=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
+REPOSITORY="https://github.com/m0tay/mach"
+ARCHIVE_NAME="mach-$VERSION-aarch64-apple-darwin.tar.gz"
+RELEASE_URL="$REPOSITORY/releases/download/v$VERSION/$ARCHIVE_NAME"
+PKG_TMP=$(mktemp -d "${TMPDIR:-/tmp}/mach-dist.XXXXXX")
+trap 'rm -rf "$PKG_TMP"' EXIT
 
-echo -e "\x1b[1;36m➜\x1b[0m Compiling mach release binary via cargo..."
-cargo build --release --bin mach
-
+echo "Building mach v$VERSION..."
+cargo build --release --locked --bin mach
 RELEASE_BIN="$SCRIPT_DIR/target/release/mach"
+codesign --force --entitlements entitlements.plist --sign - "$RELEASE_BIN"
+codesign --verify --strict "$RELEASE_BIN"
 
-if [[ ! -f "$RELEASE_BIN" ]]; then
-    echo -e "\x1b[1;31m✖\x1b[0m Release binary not found at $RELEASE_BIN"
-    exit 1
-fi
-
-echo -e "\x1b[1;36m➜\x1b[0m Signing $RELEASE_BIN with Apple Silicon Hypervisor entitlements..."
-codesign -s - --entitlements "$SCRIPT_DIR/entitlements.plist" --force "$RELEASE_BIN"
-
-# 1. Install to ~/.cargo/bin
-CARGO_BIN_DIR="${CARGO_HOME:-$HOME/.cargo}/bin"
-mkdir -p "$CARGO_BIN_DIR"
-cp "$RELEASE_BIN" "$CARGO_BIN_DIR/mach"
-codesign -s - --entitlements "$SCRIPT_DIR/entitlements.plist" --force "$CARGO_BIN_DIR/mach"
-ln -sf "$CARGO_BIN_DIR/mach" "$CARGO_BIN_DIR/machctl"
-
-# Install man pages to ~/.local/share/man/man1
-MAN_DIR="${HOME}/.local/share/man/man1"
-mkdir -p "$MAN_DIR"
-cp "$SCRIPT_DIR/man/man1/mach.1" "$MAN_DIR/"
-cp "$SCRIPT_DIR/man/man1/machctl.1" "$MAN_DIR/"
-
-echo -e "\x1b[1;32m✓\x1b[0m Installed and signed mach at $CARGO_BIN_DIR/mach"
-
-# Also update Homebrew Caskroom binary if present
-VERSION=$(grep '^version = ' "$SCRIPT_DIR/Cargo.toml" | head -n 1 | cut -d '"' -f 2)
-CASK_BIN_DIR="/opt/homebrew/Caskroom/mach/$VERSION"
-if [[ -d "$CASK_BIN_DIR" ]]; then
-    cp "$RELEASE_BIN" "$CASK_BIN_DIR/mach"
-    codesign -s - --entitlements "$SCRIPT_DIR/entitlements.plist" --force "$CASK_BIN_DIR/mach"
-    echo -e "\x1b[1;32m✓\x1b[0m Updated and signed Homebrew Caskroom binary at $CASK_BIN_DIR/mach"
-fi
-
-# 2. Package Homebrew distribution tarball
-VERSION=$(grep '^version = ' "$SCRIPT_DIR/Cargo.toml" | head -n 1 | cut -d '"' -f 2)
-echo -e "\x1b[1;36m➜\x1b[0m Packaging distribution archive for Homebrew (v$VERSION)..."
-mkdir -p "$SCRIPT_DIR/dist"
-PKG_TMP="/tmp/mach-dist-pkg-$$"
-rm -rf "$PKG_TMP"
 mkdir -p "$PKG_TMP/assets" "$PKG_TMP/man/man1" "$PKG_TMP/completions"
-
 cp "$RELEASE_BIN" "$PKG_TMP/mach"
-ln -sf "mach" "$PKG_TMP/machctl"
-cp "$SCRIPT_DIR/entitlements.plist" "$PKG_TMP/"
-cp -R "$SCRIPT_DIR/assets/"* "$PKG_TMP/assets/"
-cp -R "$SCRIPT_DIR/man/man1/"* "$PKG_TMP/man/man1/"
-
-# Generate shell completions for package distribution
-"$CARGO_BIN_DIR/mach" completion bash > "$PKG_TMP/completions/mach.bash" 2>/dev/null || true
-"$CARGO_BIN_DIR/mach" completion zsh > "$PKG_TMP/completions/_mach" 2>/dev/null || true
+ln -s mach "$PKG_TMP/machctl"
+cp entitlements.plist "$PKG_TMP/"
+cp -R assets/. "$PKG_TMP/assets/"
+cp man/man1/mach.1 man/man1/machctl.1 "$PKG_TMP/man/man1/"
+# The generator registers both command trees. Never ship empty completions.
+"$PKG_TMP/machctl" completion bash > "$PKG_TMP/completions/mach.bash"
+"$PKG_TMP/machctl" completion zsh > "$PKG_TMP/completions/_mach"
+"$PKG_TMP/machctl" completion fish > "$PKG_TMP/completions/mach.fish"
+for script in "$PKG_TMP/completions/"*; do
+    [[ -s "$script" ]] || { echo "Empty completion: $script" >&2; exit 1; }
+done
+# Both names are discoverable by zsh's completion loader.
 cp "$PKG_TMP/completions/_mach" "$PKG_TMP/completions/_machctl"
-"$CARGO_BIN_DIR/mach" completion fish > "$PKG_TMP/completions/mach.fish" 2>/dev/null || true
+mkdir -p dist
+# Normalize ownership, ordering and timestamps; gzip omits source filename/time.
+SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}
+export SOURCE_DATE_EPOCH
+python3 - "$PKG_TMP" "$SCRIPT_DIR/dist/$ARCHIVE_NAME" <<'PY'
+import gzip, os, pathlib, sys, tarfile
+root, output = pathlib.Path(sys.argv[1]), sys.argv[2]
+epoch = int(os.environ['SOURCE_DATE_EPOCH'])
+with open(output, 'wb') as raw, gzip.GzipFile(filename='', mode='wb', fileobj=raw, mtime=0) as gz:
+    with tarfile.open(fileobj=gz, mode='w', format=tarfile.USTAR_FORMAT) as archive:
+        for path in sorted(root.rglob('*')):
+            item = archive.gettarinfo(str(path), str(path.relative_to(root)))
+            item.uid = item.gid = 0
+            item.uname = item.gname = ''
+            item.mtime = epoch
+            if item.isfile():
+                with path.open('rb') as data:
+                    archive.addfile(item, data)
+            else:
+                archive.addfile(item)
+PY
+NEW_SHA=$(shasum -a 256 "dist/$ARCHIVE_NAME" | awk '{print $1}')
+python3 - "$VERSION" "$NEW_SHA" "$RELEASE_URL" <<'PY'
+import pathlib, re, sys
+version, sha, url = sys.argv[1:]
+for name in ('Formula/mach.rb', 'Casks/mach.rb'):
+    path = pathlib.Path(name)
+    text = path.read_text()
+    text = re.sub(r'(?m)^  (?:url|sha256|version) ".*"', lambda m: '  '+m[0].strip().split()[0]+' "'+{'url':url,'sha256':sha,'version':version}[m[0].strip().split()[0]]+'"', text)
+    path.write_text(text)
+PY
 
-TAR_FILE="$SCRIPT_DIR/dist/mach-$VERSION-aarch64-apple-darwin.tar.gz"
-tar -czf "$TAR_FILE" -C "$PKG_TMP" .
-rm -rf "$PKG_TMP"
-
-NEW_SHA=$(shasum -a 256 "$TAR_FILE" | awk '{print $1}')
-echo -e "  \x1b[1;34mArchive SHA256:\x1b[0m $NEW_SHA"
-
-# 3. Update Formula/mach.rb & Casks/mach.rb in repo
-sed -i '' -E "s|url \"file://.*/dist/mach-.*-aarch64-apple-darwin.tar.gz\"|url \"file://$SCRIPT_DIR/dist/mach-$VERSION-aarch64-apple-darwin.tar.gz\"|" "$SCRIPT_DIR/Formula/mach.rb"
-sed -i '' "s/sha256 \".*\"/sha256 \"$NEW_SHA\"/" "$SCRIPT_DIR/Formula/mach.rb"
-
-sed -i '' "s/version \".*\"/version \"$VERSION\"/" "$SCRIPT_DIR/Casks/mach.rb"
-sed -i '' -E "s|url \"file://.*/dist/mach-.*-aarch64-apple-darwin.tar.gz\"|url \"file://$SCRIPT_DIR/dist/mach-$VERSION-aarch64-apple-darwin.tar.gz\"|" "$SCRIPT_DIR/Casks/mach.rb"
-sed -i '' "s/sha256 \".*\"/sha256 \"$NEW_SHA\"/" "$SCRIPT_DIR/Casks/mach.rb"
-
-# 4. Update tapped Cask (and clear legacy formula in tap to prevent conflicts)
-TAP_DIR="/opt/homebrew/Library/Taps/douglaslobo/homebrew-mach"
-if [[ -d "$TAP_DIR" ]]; then
-    echo -e "\x1b[1;36m➜\x1b[0m Updating Homebrew tap at $TAP_DIR..."
-    mkdir -p "$TAP_DIR/Casks"
-    cp "$SCRIPT_DIR/Casks/mach.rb" "$TAP_DIR/Casks/mach.rb"
-    # Remove formula in tap if present to ensure clean Cask resolution and clean package-manager uninstall hooks
-    rm -f "$TAP_DIR/Formula/mach.rb" "$TAP_DIR/Formula/mach.rb.bak" || true
-    if [[ -d "$TAP_DIR/.git" ]]; then
-        git -C "$TAP_DIR" add -A
-        git -C "$TAP_DIR" commit -m "update mach cask to $VERSION ($NEW_SHA)" >/dev/null 2>&1 || true
-    fi
+CARGO_BIN_DIR="${CARGO_HOME:-$HOME/.cargo}/bin"
+mkdir -p "$CARGO_BIN_DIR" "$HOME/.local/share/man/man1"
+cp "$RELEASE_BIN" "$CARGO_BIN_DIR/mach"
+ln -sf mach "$CARGO_BIN_DIR/machctl"
+codesign --verify --strict "$CARGO_BIN_DIR/mach"
+cp man/man1/mach.1 man/man1/machctl.1 "$HOME/.local/share/man/man1/"
+if $SYNC_TAP; then
+    # Resolve the actual tap location; never commit unrelated tap changes.
+    TAP_NAME="${MACH_HOMEBREW_TAP:-m0tay/mach}"
+    TAP_DIR=$(brew --repository "$TAP_NAME")
+    [[ -d "$TAP_DIR/.git" ]] || {
+        echo "Tap $TAP_NAME is not installed. Run: brew tap $TAP_NAME $REPOSITORY" >&2
+        exit 1
+    }
+    mkdir -p "$TAP_DIR/Casks" "$TAP_DIR/Formula"
+    cp Casks/mach.rb "$TAP_DIR/Casks/mach.rb"
+    cp Formula/mach.rb "$TAP_DIR/Formula/mach.rb"
+    echo "Synced Homebrew definitions at $TAP_DIR (no commit or push)."
 fi
-
-# 5. Clear cached Homebrew download so brew doesn't use stale archive
-rm -f ~/Library/Caches/Homebrew/downloads/*mach* || true
-
-echo -e "\x1b[1;32m✓\x1b[0m Successfully built, packaged, and synced mach"
-echo ""
-echo "Quick verification:"
-echo "  mach --version"
-echo "  machctl doctor"
+printf 'Built and installed mach v%s\nArchive: dist/%s\nSHA256: %s\nPublish archive at: %s\n' "$VERSION" "$ARCHIVE_NAME" "$NEW_SHA" "$RELEASE_URL"

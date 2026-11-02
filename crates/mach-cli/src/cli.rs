@@ -167,6 +167,10 @@ pub enum Commands {
         #[arg(long)]
         system: bool,
 
+        /// Working directory in Linux (defaults to shared host working directory when available)
+        #[arg(short = 'w', long)]
+        workdir: Option<String>,
+
         /// Command and arguments to execute
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
@@ -624,3 +628,94 @@ pub enum TlsAction {
     Status,
 }
 
+
+/// Public daily-driver surface, shared by help and completion generation.
+pub fn mach_command() -> clap::Command {
+    use clap::CommandFactory;
+    let full = Cli::command();
+    let daily = ["start", "stop", "restart", "shell", "create", "delete", "list", "menu", "version", "run"];
+    let mut cmd = clap::Command::new("mach")
+        .version(env!("CARGO_PKG_VERSION"))
+        .about("Linux shell and command runner. Use machctl for administration.")
+        .override_usage("mach [OPTIONS] [COMMAND] [ARGS]...")
+        .after_help("Run mach with no arguments for a Linux login shell. Other commands run in Linux.
+Use mach -- COMMAND to run a guest command that matches a reserved lifecycle verb.
+Examples: mach uname -a; mach -m debian -u root -w /tmp pwd; mach docker ps");
+    if let Some(run) = full.find_subcommand("run") {
+        cmd = cmd.args(run.get_arguments().filter(|arg| matches!(arg.get_id().as_str(), "machine" | "user" | "workdir" | "system")).cloned());
+    }
+    cmd = cmd.args(full.get_arguments().cloned());
+    cmd.subcommands(full.get_subcommands().filter(|sub| daily.contains(&sub.get_name())).cloned())
+}
+
+/// Parse only Mach's prefix. Everything from the guest command onward stays untouched.
+pub fn route_mach_args(args: &[String]) -> anyhow::Result<Vec<String>> {
+    let mut idx = 1;
+    let mut guest_options = false;
+    while let Some(arg) = args.get(idx) {
+        match arg.as_str() {
+            "-v" | "--verbose" => idx += 1,
+            "-m" | "--machine" | "-u" | "--user" | "-w" | "--workdir" => {
+                guest_options = true;
+                anyhow::ensure!(args.get(idx + 1).is_some(), "missing value for {arg}");
+                idx += 2;
+            }
+            "--system" => { guest_options = true; idx += 1; }
+            "--" => { guest_options = true; break; }
+            _ if arg.starts_with("--machine=") || arg.starts_with("--user=") || arg.starts_with("--workdir=")
+                || (arg.starts_with("-m") || arg.starts_with("-u") || arg.starts_with("-w")) && arg.len() > 2 => {
+                guest_options = true; idx += 1;
+            }
+            _ => break,
+        }
+    }
+    let first = args.get(idx).map(String::as_str);
+    let daily = ["start", "stop", "restart", "shell", "create", "delete", "list", "ls", "menu", "run", "version", "help", "-h", "--help", "-V", "--version", "run-vm"];
+    let admin = ["doctor", "inspect", "dump", "top", "config", "daemon", "dns", "tls", "mount", "code", "link", "debug", "export", "import", "clone", "rename", "uninstall", "info", "status", "logs", "ssh", "push", "pull", "default", "k8s", "update", "completion", "init", "setup"];
+    if !guest_options {
+        if let Some(command) = first {
+            anyhow::ensure!(!admin.contains(&command), "'{command}' is a control plane command. Run 'machctl {command}' instead. Use 'mach -- {command}' to execute a Linux command with that name.");
+            if daily.contains(&command) { return Ok(args.to_vec()); }
+            anyhow::ensure!(!command.starts_with('-'), "unknown Mach option '{command}'; use 'mach -- COMMAND' for a guest command beginning with '-'");
+        }
+    }
+    let mut routed = args.to_vec();
+    routed.insert(1, "run".to_string());
+    Ok(routed)
+}
+
+#[cfg(test)]
+mod routing_tests {
+    use super::*;
+    fn parse(args: &[&str]) -> Cli {
+        Cli::try_parse_from(route_mach_args(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>()).unwrap()).unwrap()
+    }
+    #[test]
+    fn guest_arguments_are_not_mach_options() {
+        let parsed = parse(&["mach", "-m", "debian", "-u", "nobody", "-w", "/tmp", "printf", "%s", "", "a b", "--help", "-u", "root"]);
+        match parsed.command {
+            Commands::Run { machine, user, workdir, command, .. } => {
+                assert_eq!(machine.as_deref(), Some("debian"));
+                assert_eq!(user.as_deref(), Some("nobody"));
+                assert_eq!(workdir.as_deref(), Some("/tmp"));
+                assert_eq!(command, ["printf", "%s", "", "a b", "--help", "-u", "root"]);
+            }
+            _ => panic!("expected guest command"),
+        }
+    }
+    #[test]
+    fn docker_verbs_and_escape_are_guest_commands() {
+        for args in [vec!["mach", "docker", "stop", "container"], vec!["mach", "--", "start", "--", "-x"], vec!["mach", "-m", "debian", "top"]] {
+            assert!(matches!(parse(&args).command, Commands::Run { .. }));
+        }
+        assert!(route_mach_args(&["mach".into(), "inspect".into()]).is_err());
+        assert!(route_mach_args(&["mach".into(), "--bad".into()]).is_err());
+    }
+    #[test]
+    fn user_only_opens_selected_user_shell() {
+        match parse(&["mach", "-u", "nobody"]).command {
+            Commands::Run { user, command, .. } => { assert_eq!(user.as_deref(), Some("nobody")); assert!(command.is_empty()); }
+            _ => panic!("expected guest shell"),
+        }
+    }
+}
